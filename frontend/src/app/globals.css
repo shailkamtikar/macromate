@@ -34,8 +34,12 @@
   --radius-control: 0.5rem;
 }
 
+/*
+ * Dark mode: applies via OS preference by default, or a manual override
+ * (data-theme, set by ThemeToggle + localStorage) which always wins.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-surface: #0f1115;
     --color-surface-container-lowest: #181b20;
     --color-surface-container-low: #1c1f26;
@@ -56,6 +60,28 @@
     --color-fat: #fb7185;
     --color-water: #38bdf8;
   }
+}
+
+:root[data-theme="dark"] {
+  --color-surface: #0f1115;
+  --color-surface-container-lowest: #181b20;
+  --color-surface-container-low: #1c1f26;
+  --color-surface-container: #21252c;
+  --color-surface-container-high: #262b33;
+  --color-on-surface: #f4f4f5;
+  --color-on-surface-variant: #a1a1aa;
+  --color-outline-variant: #2a2f3a;
+
+  --color-primary: #22c55e;
+  --color-on-primary: #052e11;
+  --color-primary-container: #14532d;
+  --color-secondary-container: #14532d;
+  --color-on-secondary-container: #86efac;
+
+  --color-protein: #818cf8;
+  --color-carbs: #fbbf24;
+  --color-fat: #fb7185;
+  --color-water: #38bdf8;
 }
 
 @theme inline {

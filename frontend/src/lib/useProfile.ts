@@ -11,6 +11,7 @@ export interface Profile {
   height_cm: number;
   activity_level: string;
   goal: "cut" | "maintain" | "bulk";
+  dietary_mode: "vegetarian" | "non_vegetarian" | "egg_inclusive";
   target_calories: number;
   target_protein_g: number;
   target_carbs_g: number;

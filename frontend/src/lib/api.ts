@@ -241,6 +241,30 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface NotificationSettings {
+  logging_reminders_enabled: boolean;
+  reminder_times: string[];
+  streak_warnings_enabled: boolean;
+  macro_nudges_enabled: boolean;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+}
+
+export async function fetchNotificationSettings(): Promise<NotificationSettings> {
+  const res = await authFetch("/api/notification-settings");
+  return res.json();
+}
+
+export async function updateNotificationSettings(
+  settings: NotificationSettings,
+): Promise<NotificationSettings> {
+  const res = await authFetch("/api/notification-settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+  return res.json();
+}
+
 export interface ActivityLog {
   id: string;
   source: string;
