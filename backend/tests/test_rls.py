@@ -131,12 +131,16 @@ def test_food_items_are_globally_readable_but_only_creator_can_edit_unverified(
     two_users,
 ):
     a, b = two_users["a"], two_users["b"]
+    admin_headers = {
+        "apikey": settings.supabase_service_role_key,
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+    }
 
     create_resp = httpx.post(
         f"{settings.supabase_url}/rest/v1/food_items",
         headers=_rest_headers(a["token"]),
         json={
-            "name": f"RLS Test Food {uuid.uuid4().hex[:8]}",
+            "name": f"__test_rls_food_{uuid.uuid4().hex[:8]}",
             "serving_description": "1 unit",
             "calories": 100,
             "protein_g": 5,
@@ -149,21 +153,29 @@ def test_food_items_are_globally_readable_but_only_creator_can_edit_unverified(
     assert create_resp.status_code == 201, create_resp.text
     food_id = create_resp.json()[0]["id"]
 
-    # User B (different user) can read it — shared global database.
-    b_read = httpx.get(
-        f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
-        headers=_rest_headers(b["token"]),
-        timeout=15,
-    )
-    assert b_read.status_code == 200
-    assert len(b_read.json()) == 1
+    try:
+        # User B (different user) can read it — shared global database.
+        b_read = httpx.get(
+            f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
+            headers=_rest_headers(b["token"]),
+            timeout=15,
+        )
+        assert b_read.status_code == 200
+        assert len(b_read.json()) == 1
 
-    # User B cannot edit A's unverified entry.
-    b_edit = httpx.patch(
-        f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
-        headers=_rest_headers(b["token"]),
-        json={"calories": 9999},
-        timeout=15,
-    )
-    assert b_edit.status_code == 200
-    assert b_edit.json() == []  # matched 0 rows under RLS, silently no-ops
+        # User B cannot edit A's unverified entry.
+        b_edit = httpx.patch(
+            f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
+            headers=_rest_headers(b["token"]),
+            json={"calories": 9999},
+            timeout=15,
+        )
+        assert b_edit.status_code == 200
+        assert b_edit.json() == []  # matched 0 rows under RLS, silently no-ops
+    finally:
+        # food_items is a shared production table — never leave test rows in it.
+        httpx.delete(
+            f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
+            headers=admin_headers,
+            timeout=15,
+        )

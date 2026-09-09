@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
 from app.core.config import get_settings
+from app.routers.food import router as food_router
 from app.domain.macros import (
     ActivityLevel,
     BiologicalSex,
@@ -25,6 +26,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(food_router)
 
 
 @app.get("/health")
