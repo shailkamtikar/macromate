@@ -109,10 +109,34 @@ test("Calculate with AI resolves a seeded food and logs it", async ({ page }) =>
     await page.getByPlaceholder("What did you eat?").fill(`1 serving of ${foodName}`);
     await page.getByRole("button", { name: "Calculate" }).click();
 
-    await expect(page.getByText(foodName)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Add to log" }).first()).toBeVisible();
+    // Wait on "Add to log" itself (proof the item actually *resolved*),
+    // not just foodName appearing anywhere — the raw phrase we typed is
+    // echoed back verbatim even for an unresolved item, so a plain text
+    // match on foodName would pass before resolution/rendering finishes.
+    await expect(page.getByRole("button", { name: "Add to log" }).first()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Edit the AI-calculated quantity before logging (seeded food is 200
+    // kcal/serving) — the per-item calorie display and the aggregate Total
+    // below it must both recompute from the edited quantity, not silently
+    // keep showing Gemini's original 1-serving numbers.
+    const quantityInput = page.getByLabel("Quantity (x servings):");
+    await quantityInput.fill("2");
+    await expect(page.getByText("400", { exact: false }).first()).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.getByText(/Total:\s*400 kcal/)).toBeVisible();
+
     await page.getByRole("button", { name: "Add to log" }).first().click();
     await expect(page.getByText("Logged ✓")).toBeVisible({ timeout: 10_000 });
+
+    // The logged entry on Today must reflect the edited quantity (400
+    // kcal), not the AI's original 1-serving parse (200 kcal).
+    await page.goto("/today");
+    const mealRow = page.locator("li", { hasText: foodName });
+    await expect(mealRow).toBeVisible({ timeout: 10_000 });
+    await expect(mealRow).toContainText("400 kcal");
   } finally {
     await deleteUser(user.userId);
     await deleteFood(foodId);
@@ -130,6 +154,65 @@ test("Coach answers a fast-path question deterministically", async ({ page }) =>
 
     // Fast-path answers are instant and deterministic — no Gemini call.
     await expect(page.getByText(/BMI is/i)).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await deleteUser(user.userId);
+  }
+});
+
+test("Coach answers an open-ended question via real Gemini with real user context", async ({
+  page,
+}) => {
+  const user = await createOnboardedUser();
+  try {
+    await login(page, user.email, user.password);
+    await page.goto("/coach");
+
+    // Not one of the deterministic fast-path patterns (protein-left, BMI,
+    // maintenance calories, calories-left) — must actually round-trip
+    // through Gemini using the real injected profile/macro context.
+    await page.getByPlaceholder("Ask the coach…").fill(
+      "In one short sentence, is oatmeal a good breakfast for hitting a protein goal?",
+    );
+    await page.getByRole("button", { name: "Send" }).click();
+
+    await expect(page.getByText("Coach is thinking…")).toBeVisible();
+    // The user's own message plus a real generated reply — not empty, not
+    // an error, and long enough to be an actual sentence rather than a
+    // stub/placeholder string.
+    const replyBubble = page.locator("div.bg-surface-container-lowest").last();
+    await expect(replyBubble).toBeVisible({ timeout: 30_000 });
+    const replyText = await replyBubble.textContent();
+    expect((replyText ?? "").length).toBeGreaterThan(15);
+  } finally {
+    await deleteUser(user.userId);
+  }
+});
+
+test("AI food calculator gracefully handles ambiguous/unrecognizable input", async ({
+  page,
+}) => {
+  const user = await createOnboardedUser();
+  try {
+    await login(page, user.email, user.password);
+    await page.goto("/calculate");
+
+    // Gibberish, not a real food — the parser must not crash or fabricate
+    // a match; it should come back unresolved with a graceful fallback
+    // message pointing to manual search / custom food creation.
+    await page.getByPlaceholder("What did you eat?").fill("zzqxflurbnoxious 42");
+    await page.getByRole("button", { name: "Calculate" }).click();
+
+    // Gemini may either recognize zero food-like phrases at all (empty
+    // items list) or parse one phrase but fail to match it to any food in
+    // the database (resolved: false) — both are correct, graceful
+    // handling of unrecognizable input, so accept either message.
+    await expect(
+      page
+        .getByText("Couldn't recognize any food in that description.")
+        .or(page.getByText("Couldn't confidently match this to a food in the database.")),
+    ).toBeVisible({ timeout: 30_000 });
+    // No "Add to log" button should appear for unresolved/absent items.
+    await expect(page.getByRole("button", { name: "Add to log" })).toHaveCount(0);
   } finally {
     await deleteUser(user.userId);
   }

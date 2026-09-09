@@ -80,6 +80,26 @@ export default function CalculatePage() {
     }
   }
 
+  // Recomputed from the *currently edited* quantities, not the AI's
+  // original parse — otherwise editing an item's quantity updates that
+  // item's own calorie display but leaves the total summary silently
+  // stale, showing a total that no longer matches what's on screen.
+  const liveTotal = result
+    ? result.items.reduce(
+        (acc, item, i) => {
+          if (!item.resolved || item.quantity_multiplier === 0) return acc;
+          const ratio = (quantities[i] ?? item.quantity_multiplier) / item.quantity_multiplier;
+          return {
+            calories: acc.calories + (item.calories ?? 0) * ratio,
+            protein_g: acc.protein_g + (item.protein_g ?? 0) * ratio,
+            carbs_g: acc.carbs_g + (item.carbs_g ?? 0) * ratio,
+            fat_g: acc.fat_g + (item.fat_g ?? 0) * ratio,
+          };
+        },
+        { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
+      )
+    : null;
+
   return (
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4">
@@ -133,7 +153,18 @@ export default function CalculatePage() {
           </p>
         )}
 
-        {result && (
+        {result && result.items.length === 0 && (
+          <p className="rounded-[var(--radius-card)] border border-dashed border-outline-variant bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
+            Couldn&apos;t recognize any food in that description. Try describing it
+            differently, or{" "}
+            <a href="/today" className="font-semibold text-primary">
+              add it as a custom food
+            </a>
+            .
+          </p>
+        )}
+
+        {result && result.items.length > 0 && (
           <section className="space-y-3">
             {result.items.map((item, i) => (
               <div
@@ -151,17 +182,19 @@ export default function CalculatePage() {
                       </p>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
-                      <label className="text-xs text-on-surface-variant">Quantity (x servings):</label>
-                      <input
-                        type="number"
-                        min={0.1}
-                        step={0.1}
-                        value={quantities[i] ?? item.quantity_multiplier}
-                        onChange={(e) =>
-                          setQuantities((prev) => ({ ...prev, [i]: Number(e.target.value) }))
-                        }
-                        className="input w-20"
-                      />
+                      <label className="flex items-center gap-2 text-xs text-on-surface-variant">
+                        Quantity (x servings):
+                        <input
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          value={quantities[i] ?? item.quantity_multiplier}
+                          onChange={(e) =>
+                            setQuantities((prev) => ({ ...prev, [i]: Number(e.target.value) }))
+                          }
+                          className="input w-20"
+                        />
+                      </label>
                       <button
                         onClick={() => handleLogItem(i)}
                         disabled={loggedIndexes.has(i)}
@@ -185,9 +218,9 @@ export default function CalculatePage() {
 
             <div className="rounded-[var(--radius-card)] bg-surface-container-low p-4">
               <p className="text-sm font-semibold text-on-surface">
-                Total: {Math.round(result.total.calories)} kcal · P{" "}
-                {Math.round(result.total.protein_g)}g · C {Math.round(result.total.carbs_g)}g · F{" "}
-                {Math.round(result.total.fat_g)}g
+                Total: {Math.round(liveTotal!.calories)} kcal · P{" "}
+                {Math.round(liveTotal!.protein_g)}g · C {Math.round(liveTotal!.carbs_g)}g · F{" "}
+                {Math.round(liveTotal!.fat_g)}g
               </p>
             </div>
           </section>

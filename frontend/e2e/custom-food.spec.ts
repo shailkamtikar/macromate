@@ -73,9 +73,33 @@ async function login(page: import("@playwright/test").Page, email: string, passw
   await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
 }
 
+async function purgeStaleE2eCustomFoods() {
+  // Self-healing: a prior run that crashed/timed out mid-test can leave a
+  // "__e2e custom food <ts>" row behind despite this test's own teardown.
+  // Since every such row shares that literal prefix, pg_trgm flags a new
+  // one as a false-positive "duplicate" of it, breaking test isolation.
+  // Sweep them before creating this run's food, not just after.
+  const stale = await fetch(
+    `${SUPABASE_URL}/rest/v1/food_items?name=ilike.*__e2e custom food*&select=id`,
+    { headers: adminHeaders },
+  );
+  const rows: { id: string }[] = await stale.json();
+  for (const row of rows) {
+    await fetch(`${SUPABASE_URL}/rest/v1/food_logs?food_item_id=eq.${row.id}`, {
+      method: "DELETE",
+      headers: adminHeaders,
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/food_items?id=eq.${row.id}`, {
+      method: "DELETE",
+      headers: adminHeaders,
+    });
+  }
+}
+
 test("user creates a custom food, a second user discovers and logs it globally, and a duplicate is flagged", async ({
   browser,
 }) => {
+  await purgeStaleE2eCustomFoods();
   const a = await createOnboardedUser("customfooda");
   const b = await createOnboardedUser("customfoodb");
   const foodName = `__e2e custom food ${Date.now()}`;
