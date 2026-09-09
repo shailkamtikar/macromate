@@ -60,7 +60,7 @@ export default function OnboardingPage() {
 
     try {
       // Business-logic calculation stays server-side (backend), per PRD 4.2.
-      const { targets } = await fetchMacroTargets({
+      const { targets, water_goal_ml } = await fetchMacroTargets({
         weight_kg: weightKg,
         height_cm: heightCm,
         age_years: ageYears,
@@ -82,6 +82,7 @@ export default function OnboardingPage() {
         target_protein_g: targets.protein_g,
         target_carbs_g: targets.carbs_g,
         target_fat_g: targets.fat_g,
+        water_goal_ml,
       });
 
       if (upsertError) {

@@ -14,6 +14,7 @@ from app.domain.macros import (
     bmi_category,
     calculate_bmi,
     calculate_macro_targets,
+    suggested_water_goal_ml,
 )
 
 settings = get_settings()
@@ -58,12 +59,14 @@ class MacroTargetsResponse(BaseModel):
     bmi: float
     bmi_category: str
     targets: MacroTargets
+    water_goal_ml: int
 
 
 @app.post("/api/macro-targets", response_model=MacroTargetsResponse)
 def macro_targets(payload: MacroTargetsRequest) -> MacroTargetsResponse:
-    """Computes a user's BMI and daily calorie/macro targets. Pure, deterministic
-    math (app/domain/macros.py) — no AI, no external calls."""
+    """Computes a user's BMI, daily calorie/macro targets, and suggested
+    water goal. Pure, deterministic math (app/domain/macros.py) — no AI,
+    no external calls."""
     bmi = calculate_bmi(payload.weight_kg, payload.height_cm)
     targets = calculate_macro_targets(
         weight_kg=payload.weight_kg,
@@ -73,6 +76,10 @@ def macro_targets(payload: MacroTargetsRequest) -> MacroTargetsResponse:
         activity_level=payload.activity_level,
         goal=payload.goal,
     )
+    water_goal_ml = suggested_water_goal_ml(payload.weight_kg, payload.activity_level)
     return MacroTargetsResponse(
-        bmi=bmi, bmi_category=bmi_category(bmi), targets=targets
+        bmi=bmi,
+        bmi_category=bmi_category(bmi),
+        targets=targets,
+        water_goal_ml=water_goal_ml,
     )

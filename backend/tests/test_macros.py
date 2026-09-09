@@ -10,6 +10,7 @@ from app.domain.macros import (
     calculate_remaining_macros,
     calculate_tdee,
     bmi_category,
+    suggested_water_goal_ml,
 )
 
 
@@ -59,6 +60,13 @@ def test_calculate_macro_targets_cut_has_lower_calories_than_bulk():
     # kcal/g, fat 9 kcal/g), within rounding tolerance.
     reconstructed = cut.protein_g * 4 + cut.carbs_g * 4 + cut.fat_g * 9
     assert reconstructed == pytest.approx(cut.calories, abs=5)
+
+
+def test_suggested_water_goal_scales_with_weight_and_activity():
+    sedentary = suggested_water_goal_ml(70, ActivityLevel.SEDENTARY)
+    active = suggested_water_goal_ml(70, ActivityLevel.ACTIVE)
+    assert sedentary == 2450  # 70 * 35
+    assert active == 2950  # 70 * 35 + 500
 
 
 def test_calculate_remaining_macros_never_negative():

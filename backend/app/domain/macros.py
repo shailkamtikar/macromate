@@ -136,6 +136,17 @@ def calculate_macro_targets(
     )
 
 
+def suggested_water_goal_ml(weight_kg: float, activity_level: ActivityLevel) -> int:
+    """35 ml/kg bodyweight is a standard general hydration guideline; add a
+    flat 500ml for more active levels to account for extra fluid loss.
+    Editable by the user afterward (PRD §3.1) — this is only the suggested
+    starting value."""
+    base = weight_kg * 35
+    if activity_level in (ActivityLevel.ACTIVE, ActivityLevel.VERY_ACTIVE):
+        base += 500
+    return round(base)
+
+
 def calculate_remaining_macros(
     targets: MacroTargets,
     consumed_calories: int,
