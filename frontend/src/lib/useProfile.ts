@@ -18,6 +18,7 @@ export interface Profile {
   target_fat_g: number;
   water_goal_ml: number | null;
   leaderboard_visible: boolean;
+  timezone: string;
 }
 
 export function useProfile(userId: string | undefined) {

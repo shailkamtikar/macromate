@@ -2,10 +2,7 @@
 
 import { useState } from "react";
 import { logManualActivity } from "@/lib/api";
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { localDateIso as todayIso } from "@/lib/date";
 
 export function ActivityLogger() {
   const [steps, setSteps] = useState<number | "">("");

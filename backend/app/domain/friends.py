@@ -25,9 +25,16 @@ class DisciplineScore:
 
 
 def compute_discipline_score(
-    *, user_id: str, username: str, food_logs: list[dict], week_start: date, target_calories: float, is_self: bool
+    *,
+    user_id: str,
+    username: str,
+    food_logs: list[dict],
+    week_start: date,
+    target_calories: float,
+    is_self: bool,
+    tz_name: str | None = None,
 ) -> DisciplineScore:
-    daily = group_food_logs_by_day(food_logs, week_start)
+    daily = group_food_logs_by_day(food_logs, week_start, tz_name)
     summary = summarize_week(daily, week_start, target_calories)
     return DisciplineScore(
         user_id=user_id,

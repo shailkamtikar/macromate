@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.achievements import build_achievements
+from app.domain.timeutil import day_bounds_utc, local_today, utc_timestamp_to_local_date
 
 router = APIRouter(prefix="/api", tags=["achievements"])
 
@@ -32,11 +33,10 @@ def get_achievements(current_user: CurrentUserDep) -> AchievementsOut:
     if not profiles:
         raise HTTPException(status_code=404, detail="Complete onboarding first")
     profile = profiles[0]
+    tz_name = profile.get("timezone") or "UTC"
 
-    today = datetime.now(timezone.utc).date()
-    lookback_start = datetime.combine(
-        today - timedelta(days=STREAK_LOOKBACK_DAYS), datetime.min.time(), tzinfo=timezone.utc
-    )
+    today = local_today(tz_name)
+    lookback_start, _ = day_bounds_utc(today - timedelta(days=STREAK_LOOKBACK_DAYS), tz_name)
     food_logs = db.select(
         "food_logs",
         {
@@ -46,15 +46,14 @@ def get_achievements(current_user: CurrentUserDep) -> AchievementsOut:
         },
     )
     logged_dates = {
-        datetime.fromisoformat(f["logged_at"]).date() for f in food_logs
+        utc_timestamp_to_local_date(f["logged_at"], tz_name) for f in food_logs
     }
 
-    day_start = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
-    day_end = datetime.combine(today, datetime.max.time(), tzinfo=timezone.utc)
+    day_start, day_end = day_bounds_utc(today, tz_name)
     today_logs = [
         f
         for f in food_logs
-        if day_start <= datetime.fromisoformat(f["logged_at"]) <= day_end
+        if day_start <= datetime.fromisoformat(f["logged_at"]) < day_end
     ]
     consumed = {
         "calories": sum(f["calories"] for f in today_logs),
@@ -68,7 +67,8 @@ def get_achievements(current_user: CurrentUserDep) -> AchievementsOut:
         {"user_id": f"eq.{current_user.user_id}", "order": "logged_at.asc", "limit": "10"},
     )
     recent_weights = [
-        (datetime.fromisoformat(w["logged_at"]).date(), w["weight_kg"]) for w in weight_rows
+        (utc_timestamp_to_local_date(w["logged_at"], tz_name), w["weight_kg"])
+        for w in weight_rows
     ]
 
     result = build_achievements(

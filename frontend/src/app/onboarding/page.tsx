@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ActivityLevel, BiologicalSex, fetchMacroTargets, Goal } from "@/lib/api";
+import { browserTimezone } from "@/lib/date";
 import { supabase } from "@/lib/supabaseClient";
 import { useSession } from "@/lib/useSession";
 
@@ -83,6 +84,7 @@ export default function OnboardingPage() {
         target_carbs_g: targets.carbs_g,
         target_fat_g: targets.fat_g,
         water_goal_ml,
+        timezone: browserTimezone(),
       });
 
       if (upsertError) {

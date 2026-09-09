@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -7,6 +7,7 @@ from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
 from app.domain.friends import compute_discipline_score, rank_leaderboard
 from app.domain.progress import week_bounds
+from app.domain.timeutil import day_bounds_utc, local_today
 
 router = APIRouter(prefix="/api/friends", tags=["friends"])
 
@@ -166,15 +167,18 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
     id_filter = "(" + ",".join(friend_ids) + ")"
     profiles = db.select(
         "profiles",
-        {"id": f"in.{id_filter}", "select": "id,username,target_calories,leaderboard_visible"},
+        {"id": f"in.{id_filter}", "select": "id,username,target_calories,leaderboard_visible,timezone"},
     )
     # Only self + friends who've opted in are ever included — never expose
     # a friend who has leaderboard_visible = false.
     visible_profiles = [p for p in profiles if p["id"] == current_user.user_id or p["leaderboard_visible"]]
 
-    week_start, _ = week_bounds(datetime.now(timezone.utc).date())
-    start = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(week_start + timedelta(days=6), time.max, tzinfo=timezone.utc)
+    requester_tz = next(
+        (p.get("timezone") for p in profiles if p["id"] == current_user.user_id), None
+    ) or "UTC"
+    week_start, _ = week_bounds(local_today(requester_tz))
+    start, _ = day_bounds_utc(week_start, requester_tz)
+    _, end = day_bounds_utc(week_start + timedelta(days=6), requester_tz)
 
     scores = []
     for profile in visible_profiles:
@@ -182,7 +186,7 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
             "food_logs",
             {
                 "user_id": f"eq.{profile['id']}",
-                "logged_at": [f"gte.{start.isoformat()}", f"lte.{end.isoformat()}"],
+                "logged_at": [f"gte.{start.isoformat()}", f"lt.{end.isoformat()}"],
             },
         )
         scores.append(
@@ -193,6 +197,7 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
                 week_start=week_start,
                 target_calories=profile["target_calories"],
                 is_self=profile["id"] == current_user.user_id,
+                tz_name=requester_tz,
             )
         )
 

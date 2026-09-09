@@ -1,11 +1,10 @@
-from datetime import datetime, time, timezone
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.macros import MacroTargets, calculate_remaining_macros
+from app.domain.timeutil import day_bounds_utc, local_today
 
 router = APIRouter(prefix="/api", tags=["suggestions"])
 
@@ -36,14 +35,14 @@ def get_suggestions(current_user: CurrentUserDep) -> SuggestionsResponse:
     profiles = db.select("profiles", {"id": f"eq.{current_user.user_id}", "select": "*"})
     profile = profiles[0] if profiles else None
 
-    today = datetime.now(timezone.utc).date()
-    day_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
-    day_end = datetime.combine(today, time.max, tzinfo=timezone.utc)
+    tz_name = (profile.get("timezone") if profile else None) or "UTC"
+    today = local_today(tz_name)
+    day_start, day_end = day_bounds_utc(today, tz_name)
     food_logs = db.select(
         "food_logs",
         {
             "user_id": f"eq.{current_user.user_id}",
-            "logged_at": [f"gte.{day_start.isoformat()}", f"lte.{day_end.isoformat()}"],
+            "logged_at": [f"gte.{day_start.isoformat()}", f"lt.{day_end.isoformat()}"],
         },
     )
     consumed_calories = sum(f["calories"] for f in food_logs)

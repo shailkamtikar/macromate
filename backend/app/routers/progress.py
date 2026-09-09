@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.progress import WeekSummary, WeightTrend, build_weekly_report, week_bounds
+from app.domain.timeutil import day_bounds_utc, local_today
 
 router = APIRouter(prefix="/api/progress", tags=["progress"])
 
@@ -45,14 +46,16 @@ def _to_out(s: WeekSummary) -> WeekSummaryOut:
     )
 
 
-def _fetch_week_food_logs(db: SupabaseAdmin, user_id: str, week_start: date) -> list[dict]:
-    start = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(week_start + timedelta(days=6), time.max, tzinfo=timezone.utc)
+def _fetch_week_food_logs(
+    db: SupabaseAdmin, user_id: str, week_start: date, tz_name: str
+) -> list[dict]:
+    start, _ = day_bounds_utc(week_start, tz_name)
+    _, end = day_bounds_utc(week_start + timedelta(days=6), tz_name)
     return db.select(
         "food_logs",
         {
             "user_id": f"eq.{user_id}",
-            "logged_at": [f"gte.{start.isoformat()}", f"lte.{end.isoformat()}"],
+            "logged_at": [f"gte.{start.isoformat()}", f"lt.{end.isoformat()}"],
         },
     )
 
@@ -60,27 +63,28 @@ def _fetch_week_food_logs(db: SupabaseAdmin, user_id: str, week_start: date) -> 
 @router.get("/weekly", response_model=WeeklyReportOut)
 def get_weekly_report(
     current_user: CurrentUserDep,
-    ref_date: date = Query(default_factory=lambda: datetime.now(timezone.utc).date()),
+    ref_date: date | None = Query(default=None),
 ) -> WeeklyReportOut:
     db = SupabaseAdmin()
     profiles = db.select("profiles", {"id": f"eq.{current_user.user_id}", "select": "*"})
     if not profiles:
         raise HTTPException(status_code=404, detail="Complete onboarding first")
     target_calories = profiles[0]["target_calories"]
+    tz_name = profiles[0].get("timezone") or "UTC"
 
-    current_week_start, _ = week_bounds(ref_date)
+    current_week_start, _ = week_bounds(ref_date or local_today(tz_name))
     previous_week_start = current_week_start - timedelta(days=7)
 
-    current_logs = _fetch_week_food_logs(db, current_user.user_id, current_week_start)
-    previous_logs = _fetch_week_food_logs(db, current_user.user_id, previous_week_start)
+    current_logs = _fetch_week_food_logs(db, current_user.user_id, current_week_start, tz_name)
+    previous_logs = _fetch_week_food_logs(db, current_user.user_id, previous_week_start, tz_name)
 
-    weight_start = datetime.combine(current_week_start, time.min, tzinfo=timezone.utc)
-    weight_end = datetime.combine(current_week_start + timedelta(days=6), time.max, tzinfo=timezone.utc)
+    weight_start, _ = day_bounds_utc(current_week_start, tz_name)
+    _, weight_end = day_bounds_utc(current_week_start + timedelta(days=6), tz_name)
     current_weight_logs = db.select(
         "weight_logs",
         {
             "user_id": f"eq.{current_user.user_id}",
-            "logged_at": [f"gte.{weight_start.isoformat()}", f"lte.{weight_end.isoformat()}"],
+            "logged_at": [f"gte.{weight_start.isoformat()}", f"lt.{weight_end.isoformat()}"],
         },
     )
 
@@ -91,6 +95,7 @@ def get_weekly_report(
         current_week_start=current_week_start,
         previous_week_start=previous_week_start,
         target_calories=target_calories,
+        tz_name=tz_name,
     )
 
     return WeeklyReportOut(

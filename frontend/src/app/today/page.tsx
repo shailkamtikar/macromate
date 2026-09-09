@@ -18,6 +18,8 @@ import {
   logWater,
   searchFoods,
 } from "@/lib/api";
+import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
+import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
 
@@ -46,9 +48,6 @@ function inferMealType(): MealType {
   return "dinner";
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function TodayPage() {
   const router = useRouter();
@@ -73,6 +72,19 @@ export default function TodayPage() {
   useEffect(() => {
     if (profile === null) router.push("/onboarding");
   }, [profile, router]);
+
+  useEffect(() => {
+    // Keep the stored timezone in sync with the browser's — covers users
+    // onboarded before this field existed, and travel across timezones.
+    // Silent best-effort: "today" boundaries fall back to UTC if this
+    // never runs, they just won't match the user's local day.
+    if (!profile || !session) return;
+    const current = browserTimezone();
+    if (profile.timezone !== current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fire-and-forget sync, no local state touched
+      supabase.from("profiles").update({ timezone: current }).eq("id", session.user.id).then();
+    }
+  }, [profile, session]);
 
   async function reloadDay() {
     setLoadError(null);

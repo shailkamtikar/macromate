@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -7,6 +7,7 @@ from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.achievements import calculate_logging_streak
 from app.domain.notifications import NotificationTrigger, evaluate_triggers
+from app.domain.timeutil import day_bounds_utc, resolve_timezone, utc_timestamp_to_local_date
 
 router = APIRouter(prefix="/api/notification-settings", tags=["notifications"])
 
@@ -107,9 +108,11 @@ def check_triggers_now(current_user: CurrentUserDep) -> list[TriggerOut]:
     settings_rows = db.select("notification_settings", {"user_id": f"eq.{current_user.user_id}", "select": "*"})
     settings = settings_rows[0] if settings_rows else _DEFAULTS.model_dump()
 
-    now = datetime.now(timezone.utc)
+    tz_name = profile.get("timezone") or "UTC"
+    tz = resolve_timezone(tz_name)
+    now = datetime.now(tz)
     today = now.date()
-    lookback_start = datetime.combine(today - timedelta(days=60), datetime.min.time(), tzinfo=timezone.utc)
+    lookback_start, _ = day_bounds_utc(today - timedelta(days=60), tz_name)
     food_logs = db.select(
         "food_logs",
         {
@@ -118,17 +121,17 @@ def check_triggers_now(current_user: CurrentUserDep) -> list[TriggerOut]:
             "select": "logged_at,protein_g",
         },
     )
-    logged_dates = {datetime.fromisoformat(f["logged_at"]).date() for f in food_logs}
+    logged_dates = {utc_timestamp_to_local_date(f["logged_at"], tz_name) for f in food_logs}
     streak = calculate_logging_streak(logged_dates, today)
 
-    day_start = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+    day_start, _ = day_bounds_utc(today, tz_name)
     today_protein = sum(
         f["protein_g"] for f in food_logs if datetime.fromisoformat(f["logged_at"]) >= day_start
     )
     remaining_protein = max(round(profile["target_protein_g"] - today_protein), 0)
 
-    midnight = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    hours_until_midnight = (midnight - now).total_seconds() / 3600
+    midnight_local = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz)
+    hours_until_midnight = (midnight_local - now).total_seconds() / 3600
 
     reminder_times = [
         _parse_time(t) for t in settings.get("reminder_times", []) if _parse_time(t) is not None

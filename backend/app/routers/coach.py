@@ -1,5 +1,3 @@
-from datetime import datetime, time, timezone
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -13,6 +11,7 @@ from app.domain.coach import (
     deterministic_fast_path,
 )
 from app.domain.macros import ActivityLevel, BiologicalSex, Goal, MacroTargets
+from app.domain.timeutil import day_bounds_utc, local_today
 
 router = APIRouter(prefix="/api/ai/coach", tags=["ai"])
 
@@ -40,14 +39,14 @@ def _load_context(db: SupabaseAdmin, user_id: str):
     recent_weights = [w["weight_kg"] for w in reversed(weight_rows)]
     latest_weight = weight_rows[0]["weight_kg"] if weight_rows else profile.get("height_cm")
 
-    today = datetime.now(timezone.utc).date()
-    day_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
-    day_end = datetime.combine(today, time.max, tzinfo=timezone.utc)
+    tz_name = profile.get("timezone") or "UTC"
+    today = local_today(tz_name)
+    day_start, day_end = day_bounds_utc(today, tz_name)
     food_logs = db.select(
         "food_logs",
         {
             "user_id": f"eq.{user_id}",
-            "logged_at": [f"gte.{day_start.isoformat()}", f"lte.{day_end.isoformat()}"],
+            "logged_at": [f"gte.{day_start.isoformat()}", f"lt.{day_end.isoformat()}"],
         },
     )
     consumed = {

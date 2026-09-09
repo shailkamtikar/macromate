@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
 from app.domain.food import compute_nutrition_snapshot, likely_duplicates
+from app.domain.timeutil import day_bounds_utc, local_today
 
 router = APIRouter(prefix="/api", tags=["food"])
 
@@ -173,17 +174,23 @@ def log_food(payload: LogFoodRequest, current_user: CurrentUserDep) -> FoodLogOu
 @router.get("/food-logs", response_model=list[FoodLogOut])
 def list_food_logs(
     current_user: CurrentUserDep,
-    log_date: date = Query(default_factory=lambda: datetime.now(timezone.utc).date(), alias="date"),
+    log_date: date | None = Query(default=None, alias="date"),
 ) -> list[FoodLogOut]:
     db = SupabaseAdmin()
-    day_start = datetime.combine(log_date, time.min, tzinfo=timezone.utc)
-    day_end = datetime.combine(log_date, time.max, tzinfo=timezone.utc)
+    profiles = db.select(
+        "profiles", {"id": f"eq.{current_user.user_id}", "select": "timezone"}
+    )
+    tz_name = profiles[0].get("timezone") if profiles else None
+
+    # "date" is the user's local calendar date; convert to the UTC instants
+    # that span it in their timezone, not the server's UTC day.
+    day_start, day_end = day_bounds_utc(log_date or local_today(tz_name), tz_name)
 
     rows = db.select(
         "food_logs",
         {
             "user_id": f"eq.{current_user.user_id}",
-            "logged_at": [f"gte.{day_start.isoformat()}", f"lte.{day_end.isoformat()}"],
+            "logged_at": [f"gte.{day_start.isoformat()}", f"lt.{day_end.isoformat()}"],
             "select": "*,food_items(name)",
             "order": "logged_at.asc",
         },

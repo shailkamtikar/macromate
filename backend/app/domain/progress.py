@@ -10,6 +10,8 @@ and consistent with how the Today dashboard already frames "on track."
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from app.domain.timeutil import utc_timestamp_to_local_date
+
 ADHERENCE_TOLERANCE = 0.10
 
 
@@ -57,7 +59,7 @@ def week_bounds(reference: date) -> tuple[date, date]:
 
 
 def group_food_logs_by_day(
-    food_logs: list[dict], week_start: date
+    food_logs: list[dict], week_start: date, tz_name: str | None = None
 ) -> dict[date, DailyTotals]:
     totals: dict[date, DailyTotals] = {}
     for i in range(7):
@@ -66,12 +68,9 @@ def group_food_logs_by_day(
 
     accum: dict[date, list[float]] = {d: [0.0, 0.0, 0.0, 0.0] for d in totals}
     for log in food_logs:
-        logged_at = log["logged_at"]
-        day = (
-            date.fromisoformat(logged_at[:10])
-            if isinstance(logged_at, str)
-            else logged_at.date()
-        )
+        # logged_at is stored as a UTC timestamptz; bucket it by the day it
+        # fell on in the user's own timezone, not the UTC calendar day.
+        day = utc_timestamp_to_local_date(log["logged_at"], tz_name)
         if day not in accum:
             continue
         accum[day][0] += log["calories"]
@@ -149,9 +148,10 @@ def build_weekly_report(
     current_week_start: date,
     previous_week_start: date,
     target_calories: float,
+    tz_name: str | None = None,
 ) -> WeeklyReport:
-    current_daily = group_food_logs_by_day(current_food_logs, current_week_start)
-    previous_daily = group_food_logs_by_day(previous_food_logs, previous_week_start)
+    current_daily = group_food_logs_by_day(current_food_logs, current_week_start, tz_name)
+    previous_daily = group_food_logs_by_day(previous_food_logs, previous_week_start, tz_name)
 
     current_summary = summarize_week(current_daily, current_week_start, target_calories)
     previous_summary = summarize_week(previous_daily, previous_week_start, target_calories)
