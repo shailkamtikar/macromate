@@ -7,10 +7,12 @@ import {
   FoodLog,
   GlassSize,
   MealType,
+  SuggestionsResponse,
   WaterSummary,
   createGlassSize,
   fetchFoodLogs,
   fetchGlassSizes,
+  fetchSuggestions,
   fetchWaterLogs,
   logFood,
   logWater,
@@ -56,6 +58,7 @@ export default function TodayPage() {
   const [foodLogs, setFoodLogs] = useState<FoodLog[] | null>(null);
   const [water, setWater] = useState<WaterSummary | null>(null);
   const [glassSizes, setGlassSizes] = useState<GlassSize[] | null>(null);
+  const [suggestions, setSuggestions] = useState<SuggestionsResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
@@ -74,14 +77,16 @@ export default function TodayPage() {
   async function reloadDay() {
     setLoadError(null);
     try {
-      const [logs, waterSummary, glasses] = await Promise.all([
+      const [logs, waterSummary, glasses, suggestionsRes] = await Promise.all([
         fetchFoodLogs(todayIso()),
         fetchWaterLogs(todayIso()),
         fetchGlassSizes(),
+        fetchSuggestions(),
       ]);
       setFoodLogs(logs);
       setWater(waterSummary);
       setGlassSizes(glasses);
+      setSuggestions(suggestionsRes);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load today's data.");
     }
@@ -136,7 +141,7 @@ export default function TodayPage() {
     }
   }
 
-  async function handleQuickLog(food: FoodItem) {
+  async function handleQuickLog(food: { id: string }) {
     setActionError(null);
     try {
       await logFood(food.id, inferMealType(), 1);
@@ -298,7 +303,7 @@ export default function TodayPage() {
           />
           {searching && <p className="mt-2 text-xs text-on-surface-variant">Searching…</p>}
           {results.length > 0 && (
-            <ul className="mt-2 space-y-1">
+            <ul data-testid="food-search-results" className="mt-2 space-y-1">
               {results.map((food) => (
                 <li
                   key={food.id}
@@ -325,6 +330,41 @@ export default function TodayPage() {
           )}
           {actionError && <p className="mt-2 text-xs text-fat">{actionError}</p>}
         </section>
+
+        {/* Smart suggestions — deterministic constraint search, PRD §3.5 */}
+        {suggestions && suggestions.suggestions.length > 0 && (
+          <section className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-5 shadow-sm">
+            <div className="mb-2 flex items-center gap-1.5 text-primary">
+              <span className="material-symbols-outlined text-lg">psychology</span>
+              <span className="text-xs font-bold uppercase tracking-wider">
+                Suggestions for what&apos;s left
+              </span>
+            </div>
+            <p className="mb-3 text-sm text-on-surface-variant">{suggestions.message}</p>
+            <div className="space-y-2">
+              {suggestions.suggestions.map((food) => (
+                <div
+                  key={food.id}
+                  className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-on-surface">{food.name}</p>
+                    <p className="text-xs text-on-surface-variant">
+                      {food.calories} kcal · P {food.protein_g}g
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleQuickLog(food)}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
+                    aria-label={`Add ${food.name}`}
+                  >
+                    +
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Hydration */}
         <WaterCard

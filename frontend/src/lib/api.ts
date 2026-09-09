@@ -241,6 +241,30 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface SuggestedFood {
+  id: string;
+  name: string;
+  brand: string | null;
+  serving_description: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  verified: boolean;
+}
+
+export interface SuggestionsResponse {
+  message: string;
+  remaining_calories: number;
+  remaining_protein_g: number;
+  suggestions: SuggestedFood[];
+}
+
+export async function fetchSuggestions(): Promise<SuggestionsResponse> {
+  const res = await authFetch("/api/suggestions");
+  return res.json();
+}
+
 export interface CoachMessage {
   role: "user" | "assistant";
   content: string;

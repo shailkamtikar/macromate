@@ -99,9 +99,9 @@ test("login -> onboarding -> log food -> log water -> Today reflects it", async 
 
     // Log the seeded food via the real search -> add flow.
     await page.getByPlaceholder("Search foods…").fill(foodName);
-    const resultRow = page.getByText(foodName);
-    await expect(resultRow).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: `Add ${foodName}` }).click();
+    const searchResults = page.getByTestId("food-search-results");
+    await expect(searchResults).toContainText(foodName, { timeout: 10_000 });
+    await searchResults.getByRole("button", { name: `Add ${foodName}` }).click();
 
     // Meal timeline should now show it, with its 150 kcal, scoped to that
     // specific row to avoid matching the "0g / 150g" macro-target text
