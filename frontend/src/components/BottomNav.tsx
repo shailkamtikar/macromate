@@ -8,7 +8,7 @@ const ITEMS = [
   { href: "/calculate", label: "Calculate", icon: "auto_awesome" },
   { href: "/coach", label: "Coach", icon: "neurology" },
   { href: "/progress", label: "Progress", icon: "trending_up" },
-  { href: "/profile", label: "Profile", icon: "person" },
+  { href: "/friends", label: "Friends", icon: "group" },
 ];
 
 export function BottomNav() {

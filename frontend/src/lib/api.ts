@@ -241,6 +241,58 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface UserSearchResult {
+  id: string;
+  username: string;
+}
+
+export interface Friendship {
+  id: string;
+  status: "pending" | "accepted" | "declined";
+  requester_id: string;
+  addressee_id: string;
+  other_username: string;
+}
+
+export interface LeaderboardEntry {
+  user_id: string;
+  username: string;
+  discipline_score: number;
+  days_logged: number;
+  is_self: boolean;
+}
+
+export async function searchUsers(q: string): Promise<UserSearchResult[]> {
+  const res = await authFetch(`/api/friends/search?q=${encodeURIComponent(q)}`);
+  return res.json();
+}
+
+export async function sendFriendRequest(username: string): Promise<Friendship> {
+  const res = await authFetch("/api/friends/request", {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+  return res.json();
+}
+
+export async function fetchFriendships(): Promise<Friendship[]> {
+  const res = await authFetch("/api/friends");
+  return res.json();
+}
+
+export async function respondToFriendRequest(id: string, accept: boolean): Promise<Friendship> {
+  const res = await authFetch(`/api/friends/${id}/respond`, {
+    method: "POST",
+    body: JSON.stringify({ accept }),
+  });
+  return res.json();
+}
+
+export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
+  const res = await authFetch("/api/friends/leaderboard");
+  return res.json();
+}
+
 export interface Achievements {
   current_streak_days: number;
   milestones_hit: number[];

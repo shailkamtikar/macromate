@@ -187,6 +187,13 @@ export default function TodayPage() {
               Today&apos;s Balance
             </h1>
           </div>
+          <a
+            href="/profile"
+            aria-label="Profile & settings"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-on-surface-variant"
+          >
+            <span className="material-symbols-outlined text-xl">person</span>
+          </a>
         </header>
 
         {loadError && (
