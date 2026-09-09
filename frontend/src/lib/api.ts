@@ -241,6 +241,32 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface WeekSummary {
+  week_start: string;
+  week_end: string;
+  avg_calories: number;
+  avg_protein_g: number;
+  avg_carbs_g: number;
+  avg_fat_g: number;
+  days_logged: number;
+  days_goal_hit: number;
+  adherence_pct: number;
+}
+
+export interface WeeklyReport {
+  current: WeekSummary;
+  previous: WeekSummary;
+  weight_start_kg: number | null;
+  weight_end_kg: number | null;
+  weight_delta_kg: number | null;
+  wins: string[];
+}
+
+export async function fetchWeeklyReport(): Promise<WeeklyReport> {
+  const res = await authFetch("/api/progress/weekly");
+  return res.json();
+}
+
 export interface SuggestedFood {
   id: string;
   name: string;

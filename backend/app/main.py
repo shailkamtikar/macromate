@@ -8,6 +8,7 @@ from app.routers.ai_food import router as ai_food_router
 from app.routers.coach import router as coach_router
 from app.routers.diet import router as diet_router
 from app.routers.food import router as food_router
+from app.routers.progress import router as progress_router
 from app.routers.suggestions import router as suggestions_router
 from app.routers.water import router as water_router
 from app.domain.macros import (
@@ -39,6 +40,7 @@ app.include_router(ai_food_router)
 app.include_router(coach_router)
 app.include_router(suggestions_router)
 app.include_router(diet_router)
+app.include_router(progress_router)
 
 
 @app.get("/health")
