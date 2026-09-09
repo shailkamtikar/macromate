@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Achievements, WeeklyReport, fetchAchievements, fetchWeeklyReport } from "@/lib/api";
 import { useSession } from "@/lib/useSession";
+import { ActivityLogger } from "@/components/ActivityLogger";
 
 function ComparisonBar({
   label,
@@ -216,6 +217,8 @@ export default function ProgressPage() {
                 unit="g"
               />
             </section>
+
+            <ActivityLogger />
           </>
         )}
       </div>

@@ -54,9 +54,23 @@ class SupabaseAdmin:
     def select(self, table: str, params: dict) -> list[dict]:
         return self._request("GET", table, params=params).json()
 
-    def insert(self, table: str, data: dict, *, prefer="return=representation") -> list[dict]:
+    def insert(
+        self,
+        table: str,
+        data: dict,
+        *,
+        prefer="return=representation",
+        on_conflict: str | None = None,
+    ) -> list[dict]:
+        """`on_conflict` is required for merge-duplicates upserts whenever
+        the dedupe key isn't the table's primary key — PostgREST otherwise
+        defaults to resolving conflicts on the PK, which silently fails to
+        catch a conflict on a different unique constraint (a real bug this
+        caught: activity_logs' natural key is (user_id, source,
+        activity_date), not its `id` PK)."""
+        params = {"on_conflict": on_conflict} if on_conflict else None
         return self._request(
-            "POST", table, json=data, prefer=prefer
+            "POST", table, params=params, json=data, prefer=prefer
         ).json()
 
     def update(self, table: str, params: dict, data: dict) -> list[dict]:

@@ -241,6 +241,32 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface ActivityLog {
+  id: string;
+  source: string;
+  activity_date: string;
+  steps: number | null;
+  active_calories: number | null;
+  workout_minutes: number | null;
+}
+
+export async function logManualActivity(
+  activity_date: string,
+  steps: number | null,
+  workout_minutes: number | null,
+): Promise<ActivityLog> {
+  const res = await authFetch("/api/activity-logs", {
+    method: "PUT",
+    body: JSON.stringify({ activity_date, steps, workout_minutes }),
+  });
+  return res.json();
+}
+
+export async function fetchActivityLogs(start: string, end: string): Promise<ActivityLog[]> {
+  const res = await authFetch(`/api/activity-logs?start=${start}&end=${end}`);
+  return res.json();
+}
+
 export interface UserSearchResult {
   id: string;
   username: string;
