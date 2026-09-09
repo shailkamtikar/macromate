@@ -215,3 +215,47 @@ export async function logWater(volume_ml: number): Promise<WaterLog> {
 export async function deleteWaterLog(id: string): Promise<void> {
   await authFetch(`/api/water-logs/${id}`, { method: "DELETE" });
 }
+
+export interface ParsedFoodItem {
+  raw_phrase: string;
+  resolved: boolean;
+  food_item_id: string | null;
+  food_name: string | null;
+  quantity_multiplier: number;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+}
+
+export interface CalculateFoodsResponse {
+  items: ParsedFoodItem[];
+  total: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+}
+
+export async function calculateFoodsWithAi(text: string): Promise<CalculateFoodsResponse> {
+  const res = await authFetch("/api/ai/calculate-foods", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
+export interface CoachMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export async function fetchCoachHistory(): Promise<CoachMessage[]> {
+  const res = await authFetch("/api/ai/coach/history");
+  return res.json();
+}
+
+export async function sendCoachMessage(message: string): Promise<CoachMessage> {
+  const res = await authFetch("/api/ai/coach/message", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+  return res.json();
+}
