@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CreateFoodResponse,
   FoodItem,
   FoodLog,
   GlassSize,
   MealType,
   SuggestionsResponse,
   WaterSummary,
+  createFood,
   createGlassSize,
   fetchFoodLogs,
   fetchGlassSizes,
@@ -65,6 +67,20 @@ export default function TodayPage() {
   const [searching, setSearching] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newFood, setNewFood] = useState({
+    name: "",
+    serving_description: "",
+    calories: "",
+    protein_g: "",
+    carbs_g: "",
+    fat_g: "",
+  });
+  const [duplicates, setDuplicates] = useState<FoodItem[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createdNotice, setCreatedNotice] = useState<string | null>(null);
+
   useEffect(() => {
     if (!sessionLoading && !session) router.push("/login");
   }, [sessionLoading, session, router]);
@@ -81,7 +97,6 @@ export default function TodayPage() {
     if (!profile || !session) return;
     const current = browserTimezone();
     if (profile.timezone !== current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- fire-and-forget sync, no local state touched
       supabase.from("profiles").update({ timezone: current }).eq("id", session.user.id).then();
     }
   }, [profile, session]);
@@ -162,6 +177,55 @@ export default function TodayPage() {
       await reloadDay();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't log that food.");
+    }
+  }
+
+  async function submitCreateFood(force: boolean) {
+    setCreateError(null);
+    const calories = Number(newFood.calories);
+    const protein_g = Number(newFood.protein_g);
+    const carbs_g = Number(newFood.carbs_g);
+    const fat_g = Number(newFood.fat_g);
+    if (!newFood.name.trim() || !newFood.serving_description.trim()) {
+      setCreateError("Name and serving description are required.");
+      return;
+    }
+    if ([calories, protein_g, carbs_g, fat_g].some((n) => Number.isNaN(n) || n < 0)) {
+      setCreateError("Calories and macros must be numbers ≥ 0.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const res: CreateFoodResponse = await createFood({
+        name: newFood.name.trim(),
+        serving_description: newFood.serving_description.trim(),
+        calories,
+        protein_g,
+        carbs_g,
+        fat_g,
+        force,
+      });
+      if (res.created) {
+        setDuplicates([]);
+        setShowCreateForm(false);
+        setCreatedNotice(`"${res.created.name}" created — search for it above to log it.`);
+        setNewFood({
+          name: "",
+          serving_description: "",
+          calories: "",
+          protein_g: "",
+          carbs_g: "",
+          fat_g: "",
+        });
+      } else {
+        // Likely-duplicate matches found — surface them so the user can
+        // either log an existing shared food instead, or force-create.
+        setDuplicates(res.possible_duplicates);
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Couldn't create that food.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -349,6 +413,146 @@ export default function TodayPage() {
             </ul>
           )}
           {actionError && <p className="mt-2 text-xs text-fat">{actionError}</p>}
+
+          {!showCreateForm && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreateForm(true);
+                setCreatedNotice(null);
+                setDuplicates([]);
+              }}
+              className="mt-3 text-xs font-semibold text-primary underline-offset-2 hover:underline"
+            >
+              Can&apos;t find it? Create a custom food
+            </button>
+          )}
+
+          {createdNotice && (
+            <p className="mt-2 text-xs text-primary">{createdNotice}</p>
+          )}
+
+          {showCreateForm && (
+            <div className="mt-3 space-y-2 rounded-[var(--radius-control)] border border-outline-variant bg-surface-container-low p-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-on-surface">New custom food</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setCreateError(null);
+                    setDuplicates([]);
+                  }}
+                  aria-label="Cancel"
+                  className="text-on-surface-variant"
+                >
+                  <span className="material-symbols-outlined text-base">close</span>
+                </button>
+              </div>
+              <input
+                value={newFood.name}
+                onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
+                placeholder="Name"
+                aria-label="Custom food name"
+                className="input w-full"
+              />
+              <input
+                value={newFood.serving_description}
+                onChange={(e) =>
+                  setNewFood({ ...newFood, serving_description: e.target.value })
+                }
+                placeholder="Serving description (e.g. 1 bowl, 100g)"
+                aria-label="Serving description"
+                className="input w-full"
+              />
+              <div className="grid grid-cols-4 gap-2">
+                <input
+                  value={newFood.calories}
+                  onChange={(e) => setNewFood({ ...newFood, calories: e.target.value })}
+                  placeholder="kcal"
+                  aria-label="Calories"
+                  type="number"
+                  min={0}
+                  className="input"
+                />
+                <input
+                  value={newFood.protein_g}
+                  onChange={(e) => setNewFood({ ...newFood, protein_g: e.target.value })}
+                  placeholder="Protein g"
+                  aria-label="Protein grams"
+                  type="number"
+                  min={0}
+                  className="input"
+                />
+                <input
+                  value={newFood.carbs_g}
+                  onChange={(e) => setNewFood({ ...newFood, carbs_g: e.target.value })}
+                  placeholder="Carbs g"
+                  aria-label="Carbs grams"
+                  type="number"
+                  min={0}
+                  className="input"
+                />
+                <input
+                  value={newFood.fat_g}
+                  onChange={(e) => setNewFood({ ...newFood, fat_g: e.target.value })}
+                  placeholder="Fat g"
+                  aria-label="Fat grams"
+                  type="number"
+                  min={0}
+                  className="input"
+                />
+              </div>
+
+              {duplicates.length > 0 && (
+                <div className="rounded-[var(--radius-control)] bg-surface-container p-2">
+                  <p className="mb-1 text-xs font-semibold text-on-surface">
+                    Similar foods already exist — log one of these instead, or create anyway:
+                  </p>
+                  <ul className="space-y-1">
+                    {duplicates.map((d) => (
+                      <li
+                        key={d.id}
+                        className="flex items-center justify-between rounded-[var(--radius-control)] bg-surface-container-lowest px-2 py-1.5"
+                      >
+                        <span className="truncate text-xs text-on-surface">
+                          {d.name} · {d.calories} kcal
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickLog(d)}
+                          className="ml-2 flex-shrink-0 rounded-full bg-primary-container px-2 py-0.5 text-xs font-semibold text-on-primary"
+                        >
+                          Log this
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => submitCreateFood(true)}
+                    disabled={creating}
+                    className="mt-2 text-xs font-semibold text-fat underline disabled:opacity-60"
+                  >
+                    Create anyway
+                  </button>
+                </div>
+              )}
+
+              {createError && <p className="text-xs text-fat">{createError}</p>}
+
+              {duplicates.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => submitCreateFood(false)}
+                  disabled={creating}
+                  className="w-full rounded-[var(--radius-control)] bg-primary py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
+                >
+                  {creating ? "Creating…" : "Create food"}
+                </button>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Smart suggestions — deterministic constraint search, PRD §3.5 */}
