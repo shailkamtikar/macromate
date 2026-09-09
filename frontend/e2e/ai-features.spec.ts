@@ -91,8 +91,41 @@ async function login(page: import("@playwright/test").Page, email: string, passw
   await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
 }
 
+// Cleanup registry: IDs are pushed here the instant a resource is created,
+// before any slow/flaky step (Gemini calls) runs. A plain try/finally
+// *inside* the test body raced the test's own timeout — when a Gemini call
+// hung and the whole test got hard-killed at 30s, the finally block's
+// network deletes sometimes never completed, leaking seeded food_items
+// rows into the shared, production-visible foods table (confirmed live:
+// leftover "Lentil Dal Zx<suffix>" rows were surfacing in real users'
+// "what's left" suggestions). afterEach runs as its own phase with its own
+// timeout budget even after a test times out, so it's a reliable backstop
+// try/finally in the test body isn't.
+let pendingUserIds: string[] = [];
+let pendingFoodIds: string[] = [];
+
+test.afterEach(async () => {
+  // Users first: a successfully-logged food leaves a food_logs row
+  // referencing food_item_id with ON DELETE RESTRICT, so deleting the food
+  // item first fails with an FK violation — silently, since fetch()
+  // doesn't reject on a non-2xx response, so `.catch()` never sees it. The
+  // FK violation was itself the second, undiscovered leak mechanism (the
+  // first was the timeout race the comment above describes). Deleting the
+  // user first cascades their food_logs rows away, so the food item is
+  // always safe to delete afterward.
+  for (const id of pendingUserIds) {
+    await deleteUser(id).catch(() => {});
+  }
+  for (const id of pendingFoodIds) {
+    await deleteFood(id).catch(() => {});
+  }
+  pendingFoodIds = [];
+  pendingUserIds = [];
+});
+
 test("Calculate with AI resolves a seeded food and logs it", async ({ page }) => {
   const user = await createOnboardedUser();
+  pendingUserIds.push(user.userId);
   // Must be a name Gemini's parser will actually recognize as a real food
   // (it correctly returns [] for gibberish, per its own instructions) —
   // a real food word with a short alphabetic suffix, not a long numeric
@@ -101,46 +134,42 @@ test("Calculate with AI resolves a seeded food and logs it", async ({ page }) =>
   const suffix = Math.random().toString(36).slice(2, 8);
   const foodName = `Lentil Dal Zx${suffix}`;
   const foodId = await seedFood(foodName);
+  pendingFoodIds.push(foodId);
 
-  try {
-    await login(page, user.email, user.password);
-    await page.goto("/calculate");
+  await login(page, user.email, user.password);
+  await page.goto("/calculate");
 
-    await page.getByPlaceholder("What did you eat?").fill(`1 serving of ${foodName}`);
-    await page.getByRole("button", { name: "Calculate" }).click();
+  await page.getByPlaceholder("What did you eat?").fill(`1 serving of ${foodName}`);
+  await page.getByRole("button", { name: "Calculate" }).click();
 
-    // Wait on "Add to log" itself (proof the item actually *resolved*),
-    // not just foodName appearing anywhere — the raw phrase we typed is
-    // echoed back verbatim even for an unresolved item, so a plain text
-    // match on foodName would pass before resolution/rendering finishes.
-    await expect(page.getByRole("button", { name: "Add to log" }).first()).toBeVisible({
-      timeout: 30_000,
-    });
+  // Wait on "Add to log" itself (proof the item actually *resolved*),
+  // not just foodName appearing anywhere — the raw phrase we typed is
+  // echoed back verbatim even for an unresolved item, so a plain text
+  // match on foodName would pass before resolution/rendering finishes.
+  await expect(page.getByRole("button", { name: "Add to log" }).first()).toBeVisible({
+    timeout: 30_000,
+  });
 
-    // Edit the AI-calculated quantity before logging (seeded food is 200
-    // kcal/serving) — the per-item calorie display and the aggregate Total
-    // below it must both recompute from the edited quantity, not silently
-    // keep showing Gemini's original 1-serving numbers.
-    const quantityInput = page.getByLabel("Quantity (x servings):");
-    await quantityInput.fill("2");
-    await expect(page.getByText("400", { exact: false }).first()).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.getByText(/Total:\s*400 kcal/)).toBeVisible();
+  // Edit the AI-calculated quantity before logging (seeded food is 200
+  // kcal/serving) — the per-item calorie display and the aggregate Total
+  // below it must both recompute from the edited quantity, not silently
+  // keep showing Gemini's original 1-serving numbers.
+  const quantityInput = page.getByLabel("Quantity (x servings):");
+  await quantityInput.fill("2");
+  await expect(page.getByText("400", { exact: false }).first()).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(page.getByText(/Total:\s*400 kcal/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Add to log" }).first().click();
-    await expect(page.getByText("Logged ✓")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Add to log" }).first().click();
+  await expect(page.getByText("Logged ✓")).toBeVisible({ timeout: 10_000 });
 
-    // The logged entry on Today must reflect the edited quantity (400
-    // kcal), not the AI's original 1-serving parse (200 kcal).
-    await page.goto("/today");
-    const mealRow = page.locator("li", { hasText: foodName });
-    await expect(mealRow).toBeVisible({ timeout: 10_000 });
-    await expect(mealRow).toContainText("400 kcal");
-  } finally {
-    await deleteUser(user.userId);
-    await deleteFood(foodId);
-  }
+  // The logged entry on Today must reflect the edited quantity (400
+  // kcal), not the AI's original 1-serving parse (200 kcal).
+  await page.goto("/today");
+  const mealRow = page.locator("li", { hasText: foodName });
+  await expect(mealRow).toBeVisible({ timeout: 10_000 });
+  await expect(mealRow).toContainText("400 kcal");
 });
 
 test("Coach answers a fast-path question deterministically", async ({ page }) => {

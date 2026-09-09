@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ActivityLevel, BiologicalSex, Goal, MacroMode, MacroTargetsResponse } from "@/lib/api";
 import { ActivityLevelPicker } from "@/components/ActivityLevelPicker";
+import { NumericField } from "@/components/NumericField";
 import { RatePicker } from "@/components/RatePicker";
 import { TargetsEditor } from "@/components/TargetsEditor";
 import { browserTimezone } from "@/lib/date";
@@ -149,33 +150,34 @@ export default function OnboardingPage() {
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1 text-xs font-medium text-on-surface-variant">
                   Weight (kg)
-                  <input
-                    type="number"
+                  <NumericField
                     min={1}
-                    step="0.1"
+                    max={400}
                     value={weightKg}
-                    onChange={(e) => setWeightKg(Number(e.target.value))}
+                    onLiveChange={setWeightKg}
+                    onCommit={setWeightKg}
                     className="input"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-on-surface-variant">
                   Height (cm)
-                  <input
-                    type="number"
+                  <NumericField
                     min={1}
-                    step="0.1"
+                    max={280}
                     value={heightCm}
-                    onChange={(e) => setHeightCm(Number(e.target.value))}
+                    onLiveChange={setHeightCm}
+                    onCommit={setHeightCm}
                     className="input"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-on-surface-variant">
                   Age
-                  <input
-                    type="number"
+                  <NumericField
                     min={1}
+                    max={120}
                     value={ageYears}
-                    onChange={(e) => setAgeYears(Number(e.target.value))}
+                    onLiveChange={setAgeYears}
+                    onCommit={setAgeYears}
                     className="input"
                   />
                 </label>

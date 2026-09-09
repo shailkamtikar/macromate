@@ -11,6 +11,7 @@ import {
   MacroTargetsResponse,
   fetchMacroTargets,
 } from "@/lib/api";
+import { NumericField } from "@/components/NumericField";
 
 interface TargetsEditorProps {
   weightKg: number;
@@ -223,15 +224,18 @@ export function TargetsEditor({
           className="mt-2 w-full accent-[var(--color-primary)]"
         />
         <div className="mt-2 flex items-center gap-2">
-          <input
-            type="number"
+          <NumericField
             aria-label="Calorie target (kcal)"
             value={selectedCalories}
             min={sliderMin}
             max={sliderMax}
-            onChange={(e) => {
+            onLiveChange={(n) => {
               userEditedCaloriesRef.current = true;
-              setCalorieOverride(Number(e.target.value));
+              setCalorieOverride(n);
+            }}
+            onCommit={(n) => {
+              userEditedCaloriesRef.current = true;
+              setCalorieOverride(n);
             }}
             className="input w-28"
           />

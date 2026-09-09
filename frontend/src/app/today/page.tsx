@@ -12,6 +12,7 @@ import {
   WaterSummary,
   createFood,
   createGlassSize,
+  deleteFoodLog,
   fetchFoodLogs,
   fetchGlassSizes,
   fetchSuggestions,
@@ -19,8 +20,11 @@ import {
   logFood,
   logWater,
   searchFoods,
+  updateFoodLog,
 } from "@/lib/api";
 import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
+import { NumericField } from "@/components/NumericField";
+import { WaterGlasses } from "@/components/WaterGlasses";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
@@ -80,6 +84,10 @@ export default function TodayPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createdNotice, setCreatedNotice] = useState<string | null>(null);
+
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editQuantity, setEditQuantity] = useState(1);
+  const [logActionBusy, setLogActionBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionLoading && !session) router.push("/login");
@@ -149,7 +157,6 @@ export default function TodayPage() {
   );
   const waterGoal = profile.water_goal_ml ?? 2500;
   const waterTotal = water?.total_ml ?? 0;
-  const waterPercent = Math.min(Math.round((waterTotal / waterGoal) * 100), 100);
 
   async function handleSearch(q: string) {
     setQuery(q);
@@ -239,6 +246,36 @@ export default function TodayPage() {
     }
   }
 
+  async function handleSaveLogQuantity(logId: string, quantity: number) {
+    if (quantity <= 0) return;
+    setActionError(null);
+    setLogActionBusy(logId);
+    try {
+      await updateFoodLog(logId, quantity);
+      setEditingLogId(null);
+      await reloadDay();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't update that entry.");
+    } finally {
+      setLogActionBusy(null);
+    }
+  }
+
+  async function handleDeleteLog(log: FoodLog) {
+    if (!window.confirm(`Remove ${log.food_name} from today's log?`)) return;
+    setActionError(null);
+    setLogActionBusy(log.id);
+    try {
+      await deleteFoodLog(log.id);
+      if (editingLogId === log.id) setEditingLogId(null);
+      await reloadDay();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't remove that entry.");
+    } finally {
+      setLogActionBusy(null);
+    }
+  }
+
   const mealsByType: Record<MealType, FoodLog[]> = {
     breakfast: [],
     lunch: [],
@@ -250,26 +287,17 @@ export default function TodayPage() {
   return (
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4 lg:max-w-5xl">
-        <header className="flex items-center justify-between pt-1">
-          <div>
-            <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
-              {new Date().toLocaleDateString(undefined, {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
-            </p>
-            <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
-              Today&apos;s Balance
-            </h1>
-          </div>
-          <a
-            href="/profile"
-            aria-label="Profile & settings"
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-on-surface-variant"
-          >
-            <span className="material-symbols-outlined text-xl">person</span>
-          </a>
+        <header className="pt-1">
+          <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
+            {new Date().toLocaleDateString(undefined, {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
+          </p>
+          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+            Today&apos;s Balance
+          </h1>
         </header>
 
         {loadError && (
@@ -330,7 +358,7 @@ export default function TodayPage() {
           <div className="mt-4 grid grid-cols-2 gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-2">
             <div className="px-2 py-1">
               <p className="text-xs text-on-surface-variant">Consumed</p>
-              <p className="font-semibold text-on-surface">
+              <p className="font-semibold text-on-surface" data-testid="consumed-calories">
                 {Math.round(consumed.calories)}{" "}
                 <span className="text-xs font-normal text-on-surface-variant">kcal</span>
               </p>
@@ -594,7 +622,6 @@ export default function TodayPage() {
         <WaterCard
           totalMl={waterTotal}
           goalMl={waterGoal}
-          percent={waterPercent}
           glassSizes={glassSizes ?? []}
           onQuickLog={handleQuickWater}
           onGlassAdded={reloadDay}
@@ -622,14 +649,70 @@ export default function TodayPage() {
                     {MEAL_LABELS[mealType]}
                   </h3>
                   <ul className="space-y-2">
-                    {mealsByType[mealType].map((log) => (
-                      <li key={log.id} className="flex items-center justify-between text-sm">
-                        <span className="text-on-surface">{log.food_name}</span>
-                        <span className="text-on-surface-variant">
-                          {Math.round(log.calories)} kcal
-                        </span>
-                      </li>
-                    ))}
+                    {mealsByType[mealType].map((log) =>
+                      editingLogId === log.id ? (
+                        <li key={log.id} className="flex items-center gap-2 text-sm">
+                          <span className="min-w-0 flex-1 truncate text-on-surface">
+                            {log.food_name}
+                          </span>
+                          <NumericField
+                            aria-label={`Quantity for ${log.food_name}`}
+                            value={editQuantity}
+                            min={0.1}
+                            max={100}
+                            onLiveChange={setEditQuantity}
+                            onCommit={setEditQuantity}
+                            className="input w-16 text-right"
+                          />
+                          <button
+                            type="button"
+                            disabled={logActionBusy === log.id}
+                            onClick={() => handleSaveLogQuantity(log.id, editQuantity)}
+                            aria-label={`Save ${log.food_name}`}
+                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary disabled:opacity-60"
+                          >
+                            <span className="material-symbols-outlined text-sm">check</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingLogId(null)}
+                            aria-label="Cancel edit"
+                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-surface-container text-on-surface-variant"
+                          >
+                            <span className="material-symbols-outlined text-sm">close</span>
+                          </button>
+                        </li>
+                      ) : (
+                        <li key={log.id} className="flex items-center gap-2 text-sm">
+                          <span className="min-w-0 flex-1 truncate text-on-surface">
+                            {log.food_name}
+                          </span>
+                          <span className="flex-shrink-0 text-on-surface-variant">
+                            {Math.round(log.calories)} kcal
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingLogId(log.id);
+                              setEditQuantity(log.quantity);
+                            }}
+                            aria-label={`Edit ${log.food_name}`}
+                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant"
+                          >
+                            <span className="material-symbols-outlined text-sm">edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={logActionBusy === log.id}
+                            onClick={() => handleDeleteLog(log)}
+                            aria-label={`Remove ${log.food_name}`}
+                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-fat disabled:opacity-60"
+                          >
+                            <span className="material-symbols-outlined text-sm">delete</span>
+                          </button>
+                        </li>
+                      ),
+                    )}
                   </ul>
                 </div>
               ),
@@ -644,14 +727,12 @@ export default function TodayPage() {
 function WaterCard({
   totalMl,
   goalMl,
-  percent,
   glassSizes,
   onQuickLog,
   onGlassAdded,
 }: {
   totalMl: number;
   goalMl: number;
-  percent: number;
   glassSizes: GlassSize[];
   onQuickLog: (ml: number) => void;
   onGlassAdded: () => void;
@@ -672,13 +753,22 @@ function WaterCard({
     { id: "default-250", label: "250ml", volume_ml: 250 },
     { id: "default-500", label: "500ml", volume_ml: 500 },
   ];
+  // The smallest configured container is what "a glass" means for this
+  // user — visualizing hydration in terms of a 1000ml "big bottle" reads
+  // wrong ("2 bottles" isn't the mental model "glasses" implies).
+  const unitMl = quickOptions.reduce(
+    (min, g) => Math.min(min, g.volume_ml),
+    quickOptions[0]?.volume_ml ?? 250,
+  );
 
   return (
     <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-on-surface">Hydration</h3>
-          <p className="text-xs text-on-surface-variant">Daily target: {goalMl} ml</p>
+          <p className="text-xs text-on-surface-variant">
+            Daily target: {goalMl} ml · {unitMl} ml glass
+          </p>
         </div>
         <span
           data-testid="water-total"
@@ -687,11 +777,8 @@ function WaterCard({
           {totalMl} <span className="text-xs font-normal text-on-surface-variant">ml</span>
         </span>
       </div>
-      <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-surface-container">
-        <div
-          className="h-full rounded-full bg-water transition-all"
-          style={{ width: `${percent}%` }}
-        />
+      <div className="mt-3">
+        <WaterGlasses totalMl={totalMl} unitMl={unitMl} goalMl={goalMl} />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {quickOptions.map((g) => (
@@ -723,13 +810,7 @@ function WaterCard({
           </label>
           <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
             Volume (ml)
-            <input
-              type="number"
-              min={1}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              className="input w-24"
-            />
+            <NumericField min={1} max={5000} value={volume} onCommit={setVolume} className="input w-24" />
           </label>
           <button
             type="submit"

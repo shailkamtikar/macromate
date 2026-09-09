@@ -71,8 +71,11 @@ test("profile edit recalculates targets and persists; dark mode toggle persists"
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
 
-    await page.getByRole("link", { name: "Profile & settings" }).click();
-    await expect(page).toHaveURL(/\/profile/);
+    // Profile/settings is now a persistent app-level trigger (available on
+    // every major screen) that opens a retractable panel over the current
+    // page, rather than a per-page link that navigates away.
+    await page.getByRole("button", { name: "Profile & settings" }).click();
+    await expect(page.getByRole("dialog", { name: "Profile & settings" })).toBeVisible();
 
     // Change goal to "Cut", pick a weight-loss rate, and weight, then save
     // — should recalculate a lower calorie target through the real backend.
@@ -96,6 +99,10 @@ test("profile edit recalculates targets and persists; dark mode toggle persists"
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    // The panel is a fresh, closed overlay after reload — reopen it.
+    await page.getByRole("button", { name: "Profile & settings" }).click();
+    await expect(page.getByRole("dialog", { name: "Profile & settings" })).toBeVisible();
 
     // Logout actually clears the session and redirects.
     await page.getByRole("button", { name: "Log out" }).click();

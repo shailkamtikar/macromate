@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ActivityLevel,
@@ -17,6 +17,7 @@ import {
   updateNotificationSettings,
 } from "@/lib/api";
 import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
+import { NumericField } from "@/components/NumericField";
 import { RatePicker } from "@/components/RatePicker";
 import { TargetsEditor } from "@/components/TargetsEditor";
 import { supabase } from "@/lib/supabaseClient";
@@ -43,6 +44,13 @@ export default function ProfilePage() {
   // value and never fall back to a hardcoded placeholder.
   const [latestWeightKg, setLatestWeightKg] = useState<number | null | undefined>(undefined);
   const [weightKg, setWeightKg] = useState<number | null>(null);
+  // Guards against a real race: the initial weight_logs fetch below is
+  // async and can resolve *after* the user has already edited the weight
+  // field (e.g. the panel opens instantly now that it's an in-page drawer
+  // rather than a full navigation, giving the user much less "dead time"
+  // before they can start typing) — without this, that late resolution
+  // would silently clobber their edit back to the last persisted value.
+  const weightEditedRef = useRef(false);
 
   const [rateKgPerWeek, setRateKgPerWeek] = useState<number | null>(null);
   const [macroMode, setMacroMode] = useState<MacroMode>("automatic");
@@ -81,7 +89,7 @@ export default function ProfilePage() {
       .then(({ data }) => {
         const value = data?.weight_kg ?? null;
         setLatestWeightKg(value);
-        setWeightKg(value);
+        if (!weightEditedRef.current) setWeightKg(value);
       });
   }, [session]);
 
@@ -216,28 +224,40 @@ export default function ProfilePage() {
             </label>
             <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
               Current weight (kg)
-              <input
-                type="number"
-                value={weightKg ?? ""}
-                onChange={(e) => setWeightKg(Number(e.target.value))}
+              <NumericField
+                min={1}
+                max={400}
+                value={weightKg ?? 0}
+                onLiveChange={(n) => {
+                  weightEditedRef.current = true;
+                  setWeightKg(n > 0 ? n : null);
+                }}
+                onCommit={(n) => {
+                  weightEditedRef.current = true;
+                  setWeightKg(n > 0 ? n : null);
+                }}
                 className="input"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
               Height (cm)
-              <input
-                type="number"
-                value={form.height_cm ?? ""}
-                onChange={(e) => setForm({ ...form, height_cm: Number(e.target.value) })}
+              <NumericField
+                min={1}
+                max={280}
+                value={form.height_cm ?? 0}
+                onLiveChange={(n) => setForm({ ...form, height_cm: n })}
+                onCommit={(n) => setForm({ ...form, height_cm: n })}
                 className="input"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
               Age
-              <input
-                type="number"
-                value={form.age_years ?? ""}
-                onChange={(e) => setForm({ ...form, age_years: Number(e.target.value) })}
+              <NumericField
+                min={1}
+                max={120}
+                value={form.age_years ?? 0}
+                onLiveChange={(n) => setForm({ ...form, age_years: n })}
+                onCommit={(n) => setForm({ ...form, age_years: n })}
                 className="input"
               />
             </label>
@@ -380,10 +400,11 @@ export default function ProfilePage() {
             </label>
             <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
               ml
-              <input
-                type="number"
+              <NumericField
+                min={1}
+                max={5000}
                 value={newGlassVolume}
-                onChange={(e) => setNewGlassVolume(Number(e.target.value))}
+                onCommit={setNewGlassVolume}
                 className="input w-20"
               />
             </label>

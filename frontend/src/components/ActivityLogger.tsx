@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { logManualActivity } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { fetchActivityLogs, logManualActivity } from "@/lib/api";
 import { localDateIso as todayIso } from "@/lib/date";
 
 export function ActivityLogger() {
@@ -9,6 +9,30 @@ export function ActivityLogger() {
   const [minutes, setMinutes] = useState<number | "">("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const today = todayIso();
+    // Show whatever the user already recorded for today, not a blank form
+    // that looks like nothing was logged — a real bug this fixes.
+    fetchActivityLogs(today, today)
+      .then((logs) => {
+        if (cancelled) return;
+        const manual = logs.find((l) => l.source === "manual");
+        if (manual) {
+          if (manual.steps !== null) setSteps(manual.steps);
+          if (manual.workout_minutes !== null) setMinutes(manual.workout_minutes);
+          setSaved(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSave() {
     setError(null);
@@ -31,6 +55,12 @@ export function ActivityLogger() {
         Automatic Health Connect / HealthKit sync isn&apos;t possible from a web app — both are
         native-OS-only APIs with no browser access. Log manually instead.
       </p>
+      {loaded && saved && (
+        <p className="mb-2 text-xs text-primary">
+          Recorded today: {steps === "" ? "0" : steps} steps
+          {minutes !== "" ? `, ${minutes} min workout` : ""}.
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
           Steps
@@ -59,7 +89,6 @@ export function ActivityLogger() {
           Save
         </button>
       </div>
-      {saved && <p className="mt-2 text-xs text-primary">Saved.</p>}
       {error && <p className="mt-2 text-xs text-fat">{error}</p>}
     </section>
   );

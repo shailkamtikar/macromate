@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { BottomNav } from "@/components/BottomNav";
+import { SettingsDrawer } from "@/components/SettingsDrawer";
 import { THEME_COOKIE_NAME } from "@/lib/theme";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -50,6 +51,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col bg-surface text-on-surface font-body">
         <div className="flex flex-1 flex-col">{children}</div>
         <BottomNav />
+        <SettingsDrawer />
       </body>
     </html>
   );

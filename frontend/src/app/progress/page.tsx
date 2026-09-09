@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Achievements, WeeklyReport, fetchAchievements, fetchWeeklyReport } from "@/lib/api";
 import { useSession } from "@/lib/useSession";
 import { ActivityLogger } from "@/components/ActivityLogger";
+import { WeightHistoryChart } from "@/components/WeightHistoryChart";
 
 function ComparisonBar({
   label,
@@ -120,6 +121,8 @@ export default function ProgressPage() {
                 </p>
               </div>
             </section>
+
+            <WeightHistoryChart userId={session.user.id} />
 
             {achievements && (
               <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">

@@ -206,6 +206,18 @@ export async function fetchFoodLogs(date: string): Promise<FoodLog[]> {
   return res.json();
 }
 
+export async function updateFoodLog(logId: string, quantity: number): Promise<FoodLog> {
+  const res = await authFetch(`/api/food-logs/${logId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quantity }),
+  });
+  return res.json();
+}
+
+export async function deleteFoodLog(logId: string): Promise<void> {
+  await authFetch(`/api/food-logs/${logId}`, { method: "DELETE" });
+}
+
 export async function fetchGlassSizes(): Promise<GlassSize[]> {
   const res = await authFetch("/api/glass-sizes");
   return res.json();

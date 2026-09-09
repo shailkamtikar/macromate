@@ -72,9 +72,32 @@ async function deleteFoodItem(id: string) {
   });
 }
 
+async function purgeStaleE2eTestFoods() {
+  // Self-healing: a prior run that crashed/timed out mid-test can leave a
+  // "__e2e_test_food_<ts>" row behind despite this test's own teardown —
+  // confirmed live (leaked rows surfaced as real users' food suggestions).
+  // Sweep them before seeding this run's food, not just after.
+  const stale = await fetch(
+    `${SUPABASE_URL}/rest/v1/food_items?name=ilike.__e2e_test_food_*&select=id`,
+    { headers: adminHeaders },
+  );
+  const rows: { id: string }[] = await stale.json();
+  for (const row of rows) {
+    await fetch(`${SUPABASE_URL}/rest/v1/food_logs?food_item_id=eq.${row.id}`, {
+      method: "DELETE",
+      headers: adminHeaders,
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/food_items?id=eq.${row.id}`, {
+      method: "DELETE",
+      headers: adminHeaders,
+    });
+  }
+}
+
 test("login -> onboarding -> log food -> log water -> Today reflects it", async ({
   page,
 }) => {
+  await purgeStaleE2eTestFoods();
   const user = await createConfirmedUser();
   const foodName = `__e2e_test_food_${Date.now()}`;
   const foodId = await seedFoodItem(foodName);
