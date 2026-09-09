@@ -10,6 +10,7 @@ from app.routers.coach import router as coach_router
 from app.routers.diet import router as diet_router
 from app.routers.food import router as food_router
 from app.routers.friends import router as friends_router
+from app.routers.notifications import router as notifications_router
 from app.routers.progress import router as progress_router
 from app.routers.suggestions import router as suggestions_router
 from app.routers.water import router as water_router
@@ -45,6 +46,7 @@ app.include_router(diet_router)
 app.include_router(progress_router)
 app.include_router(achievements_router)
 app.include_router(friends_router)
+app.include_router(notifications_router)
 
 
 @app.get("/health")
