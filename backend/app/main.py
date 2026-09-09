@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
 from app.core.config import get_settings
+from app.routers.ai_food import router as ai_food_router
 from app.routers.food import router as food_router
 from app.routers.water import router as water_router
 from app.domain.macros import (
@@ -31,6 +32,7 @@ app.add_middleware(
 
 app.include_router(food_router)
 app.include_router(water_router)
+app.include_router(ai_food_router)
 
 
 @app.get("/health")
