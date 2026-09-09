@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WeeklyReport, fetchWeeklyReport } from "@/lib/api";
+import { Achievements, WeeklyReport, fetchAchievements, fetchWeeklyReport } from "@/lib/api";
 import { useSession } from "@/lib/useSession";
 
 function ComparisonBar({
@@ -50,12 +50,16 @@ function ComparisonBar({
 export default function ProgressPage() {
   const { session, loading: sessionLoading } = useSession();
   const [report, setReport] = useState<WeeklyReport | null>(null);
+  const [achievements, setAchievements] = useState<Achievements | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
-    fetchWeeklyReport()
-      .then(setReport)
+    Promise.all([fetchWeeklyReport(), fetchAchievements()])
+      .then(([weekly, ach]) => {
+        setReport(weekly);
+        setAchievements(ach);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load progress."));
   }, [session]);
 
@@ -115,6 +119,53 @@ export default function ProgressPage() {
                 </p>
               </div>
             </section>
+
+            {achievements && (
+              <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                      Logging streak
+                    </p>
+                    <p className="font-display text-2xl font-bold text-on-surface">
+                      {achievements.current_streak_days}{" "}
+                      <span className="text-base font-medium text-on-surface-variant">days</span>
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    {[3, 7, 14, 30].map((m) => (
+                      <span
+                        key={m}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${
+                          achievements.milestones_hit.includes(m)
+                            ? "bg-primary text-on-primary"
+                            : "bg-surface-container text-on-surface-variant"
+                        }`}
+                        title={`${m}-day streak`}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {(achievements.calorie_goal_hit_today || achievements.weight_lower_than_last) && (
+                  <div className="mt-2 space-y-1">
+                    {achievements.calorie_goal_hit_today && (
+                      <p className="flex items-center gap-1.5 text-xs text-primary">
+                        <span className="material-symbols-outlined text-sm">celebration</span>
+                        Calorie goal hit today!
+                      </p>
+                    )}
+                    {achievements.weight_lower_than_last && (
+                      <p className="flex items-center gap-1.5 text-xs text-primary">
+                        <span className="material-symbols-outlined text-sm">trending_down</span>
+                        Weight down {Math.abs(achievements.weight_delta_kg ?? 0)}kg since last entry.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
 
             {report.wins.length > 0 && (
               <section className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-4 shadow-sm">

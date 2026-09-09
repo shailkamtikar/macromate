@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
 from app.core.config import get_settings
+from app.routers.achievements import router as achievements_router
 from app.routers.ai_food import router as ai_food_router
 from app.routers.coach import router as coach_router
 from app.routers.diet import router as diet_router
@@ -41,6 +42,7 @@ app.include_router(coach_router)
 app.include_router(suggestions_router)
 app.include_router(diet_router)
 app.include_router(progress_router)
+app.include_router(achievements_router)
 
 
 @app.get("/health")

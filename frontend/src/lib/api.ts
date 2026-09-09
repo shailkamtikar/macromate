@@ -241,6 +241,21 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+export interface Achievements {
+  current_streak_days: number;
+  milestones_hit: number[];
+  newest_milestone: number | null;
+  weight_lower_than_last: boolean;
+  weight_delta_kg: number | null;
+  calorie_goal_hit_today: boolean;
+  macro_goals_hit_today: Record<string, boolean>;
+}
+
+export async function fetchAchievements(): Promise<Achievements> {
+  const res = await authFetch("/api/achievements");
+  return res.json();
+}
+
 export interface WeekSummary {
   week_start: string;
   week_end: string;
