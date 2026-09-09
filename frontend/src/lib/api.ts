@@ -265,6 +265,33 @@ export async function fetchSuggestions(): Promise<SuggestionsResponse> {
   return res.json();
 }
 
+export type DietaryMode = "vegetarian" | "non_vegetarian" | "egg_inclusive";
+
+export interface GeneratedMeal {
+  meal_type: string;
+  description: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+export interface GenerateDietResponse {
+  meals: GeneratedMeal[];
+  notes: string;
+  target: MacroTargets;
+  plan_total_calories: number;
+  within_tolerance: boolean;
+}
+
+export async function generateDiet(dietary_mode: DietaryMode): Promise<GenerateDietResponse> {
+  const res = await authFetch("/api/ai/generate-diet", {
+    method: "POST",
+    body: JSON.stringify({ dietary_mode }),
+  });
+  return res.json();
+}
+
 export interface CoachMessage {
   role: "user" | "assistant";
   content: string;

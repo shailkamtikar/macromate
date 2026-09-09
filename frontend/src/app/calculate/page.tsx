@@ -9,6 +9,7 @@ import {
   logFood,
 } from "@/lib/api";
 import { useSession } from "@/lib/useSession";
+import { DietPlanGenerator } from "@/components/DietPlanGenerator";
 
 const MEAL_OPTIONS: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
@@ -191,6 +192,8 @@ export default function CalculatePage() {
             </div>
           </section>
         )}
+
+        <DietPlanGenerator />
       </div>
     </main>
   );
