@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn[standard]>=0.52.4",
     "pydantic-settings>=2.6.1",
     "python-dotenv>=1.0.1",
+    "pyjwt[crypto]>=2.13.0",
+    "cachetools>=7.1.8",
 ]
 
 [dependency-groups]

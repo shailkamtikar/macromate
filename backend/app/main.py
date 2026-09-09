@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.core.auth import CurrentUserDep
 from app.core.config import get_settings
 from app.domain.macros import (
     ActivityLevel,
@@ -29,6 +30,14 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}
+
+
+@app.get("/api/me")
+def me(current_user: CurrentUserDep) -> dict[str, str | None]:
+    """Proves the Supabase Auth JWT verification pipeline works end to end:
+    requires a real access token from a real Supabase Auth session, verified
+    against the project's live JWKS — no bypass, no fake session."""
+    return {"user_id": current_user.user_id, "email": current_user.email}
 
 
 class MacroTargetsRequest(BaseModel):
