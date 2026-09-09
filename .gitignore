@@ -1,0 +1,16 @@
+# Root-level tooling secrets (e.g. Stitch MCP API key)
+.env
+
+# Backend (Python/uv)
+backend/.env
+backend/.venv/
+backend/**/__pycache__/
+backend/.pytest_cache/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# frontend/ has its own .gitignore (create-next-app default, extended for
+# .env.example) — not duplicated here.
