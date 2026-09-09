@@ -155,7 +155,12 @@ def macro_targets(payload: MacroTargetsRequest) -> MacroTargetsResponse:
                 fat_g=payload.custom_fat_g,
             )
         else:
-            targets = macros_for_calories(final_calories, payload.weight_kg, payload.goal)
+            targets = macros_for_calories(
+                final_calories,
+                payload.weight_kg,
+                payload.goal,
+                reference_calories=recommended.calories,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

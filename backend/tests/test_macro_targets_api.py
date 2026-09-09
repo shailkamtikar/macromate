@@ -128,6 +128,27 @@ def test_calorie_override_recalculates_macros_automatically():
     assert abs(reconstructed - t["calories"]) <= 5
 
 
+def test_calorie_override_moves_protein_not_just_carbs_and_fat():
+    """Regression test for a real bug: protein used to be a pure function
+    of (weight_kg, goal), so overriding the calorie target left protein
+    frozen at ~224g while only carbs/fat absorbed the change. The API-level
+    response must show protein actually move too."""
+    baseline = client.post("/api/macro-targets", json=BASE_PAYLOAD).json()
+    recommended = baseline["recommended_calories"]
+    baseline_protein = baseline["targets"]["protein_g"]
+
+    lowered = client.post(
+        "/api/macro-targets",
+        json={**BASE_PAYLOAD, "calorie_override": recommended - 400},
+    ).json()
+    raised = client.post(
+        "/api/macro-targets",
+        json={**BASE_PAYLOAD, "calorie_override": recommended + 400},
+    ).json()
+
+    assert lowered["targets"]["protein_g"] < baseline_protein < raised["targets"]["protein_g"]
+
+
 def test_custom_macro_mode_within_tolerance_accepted():
     baseline = client.post("/api/macro-targets", json=BASE_PAYLOAD).json()
     calories = baseline["recommended_calories"]

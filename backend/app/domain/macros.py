@@ -61,6 +61,16 @@ _GOAL_PROTEIN_G_PER_KG: dict[Goal, float] = {
 # Fat as a fraction of total daily calories; remainder goes to carbs.
 _FAT_CALORIE_FRACTION = 0.25
 
+# Protein is pinned to the goal's g/kg-bodyweight target at the
+# *recommended* calorie level and then re-expressed as a percentage of
+# calories (see macros_for_calories) so that adjusting the calorie target
+# recalculates protein/carbs/fat together instead of leaving protein frozen.
+# These bounds keep that percentage nutritionally sane at the extremes of
+# the allowed calorie-override range, regardless of what the g/kg baseline
+# would otherwise imply.
+_MIN_PROTEIN_CALORIE_FRACTION = 0.15
+_MAX_PROTEIN_CALORIE_FRACTION = 0.45
+
 # Standard estimate: ~7700 kcal of deficit/surplus per kg of body weight
 # change (the widely-cited "3500 kcal per lb" rule converted to kg).
 KG_PER_WEEK_TO_DAILY_KCAL = 7700 / 7
@@ -167,12 +177,36 @@ def safe_calorie_floor(bmr: float) -> int:
     return max(MIN_SAFE_DAILY_CALORIES, round(bmr))
 
 
-def macros_for_calories(calories: int, weight_kg: float, goal: Goal) -> MacroTargets:
-    """Splits an already-decided calorie target into protein/fat/carbs.
-    Shared by the recommended-target pipeline and by "recompute macros
-    after the user overrode calories" — the split logic is identical
-    either way, only where `calories` came from differs."""
-    protein_g = round(weight_kg * _GOAL_PROTEIN_G_PER_KG[goal])
+def macros_for_calories(
+    calories: int,
+    weight_kg: float,
+    goal: Goal,
+    reference_calories: int | None = None,
+) -> MacroTargets:
+    """Splits a calorie target into protein/fat/carbs.
+
+    Protein starts from the goal's g/kg-bodyweight target (the existing
+    per-goal philosophy: higher on a cut to preserve lean mass, etc.),
+    pinned at `reference_calories` — normally the deterministically
+    recommended calorie target for this weight/goal/activity — and then
+    re-expressed as a *percentage of calories*. That means when the final
+    `calories` differs from the reference (a user override, the calorie
+    slider, or a profile edit), protein is recalculated together with
+    fat/carbs instead of staying frozen at the reference-point gram value
+    while only carbs/fat move. Omitting `reference_calories` anchors the
+    percentage to `calories` itself, reproducing the plain per-kg gram
+    value exactly — used by the primary recommended-calories pipeline
+    where there's no separate override yet.
+    """
+    reference = reference_calories if reference_calories is not None else calories
+    reference_protein_g = weight_kg * _GOAL_PROTEIN_G_PER_KG[goal]
+    protein_fraction = (
+        (reference_protein_g * 4) / reference if reference > 0 else _MIN_PROTEIN_CALORIE_FRACTION
+    )
+    protein_fraction = min(
+        max(protein_fraction, _MIN_PROTEIN_CALORIE_FRACTION), _MAX_PROTEIN_CALORIE_FRACTION
+    )
+    protein_g = round((calories * protein_fraction) / 4)
     fat_g = round((calories * _FAT_CALORIE_FRACTION) / 9)
     remaining_calories_for_carbs = calories - (protein_g * 4) - (fat_g * 9)
     carbs_g = max(round(remaining_calories_for_carbs / 4), 0)

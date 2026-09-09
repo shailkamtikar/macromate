@@ -246,3 +246,72 @@ def test_custom_macros_far_from_target_calories_rejected():
 def test_custom_macros_rejects_negative_grams():
     with pytest.raises(ValueError):
         validate_custom_macros(protein_g=-10, carbs_g=200, fat_g=65, target_calories=2000)
+
+
+# ---------------------------------------------------------------------------
+# Automatic macro recalculation across calorie overrides — regression
+# coverage for a real bug: protein used to be a pure function of
+# (weight_kg, goal), so overriding the calorie target left protein frozen
+# at ~224g while only fat/carbs moved. Protein must now move together with
+# the others whenever `calories` differs from `reference_calories`.
+# ---------------------------------------------------------------------------
+def test_macros_for_calories_without_reference_matches_plain_per_kg_value():
+    # No reference_calories given -> identical to the original per-kg
+    # behavior (backward compatible for the primary recommended pipeline).
+    targets = macros_for_calories(2200, weight_kg=90, goal=Goal.CUT)
+    assert targets.protein_g == round(90 * 2.2)
+
+
+@pytest.mark.parametrize("goal", [Goal.CUT, Goal.MAINTAIN, Goal.BULK])
+def test_protein_recalculates_when_calories_move_away_from_reference(goal):
+    reference_calories = 2500
+    at_reference = macros_for_calories(
+        reference_calories, weight_kg=90, goal=goal, reference_calories=reference_calories
+    )
+    lower = macros_for_calories(
+        reference_calories - 400, weight_kg=90, goal=goal, reference_calories=reference_calories
+    )
+    higher = macros_for_calories(
+        reference_calories + 400, weight_kg=90, goal=goal, reference_calories=reference_calories
+    )
+    # Protein must not stay frozen — it should move down/up with calories,
+    # not just carbs/fat.
+    assert lower.protein_g < at_reference.protein_g < higher.protein_g
+
+
+def test_protein_at_reference_calories_matches_goal_g_per_kg_baseline():
+    # At the reference (recommended) calorie point itself, protein must
+    # still equal the goal's g/kg-bodyweight philosophy exactly — the fix
+    # only changes behavior *away* from the reference point.
+    targets = macros_for_calories(2500, weight_kg=90, goal=Goal.CUT, reference_calories=2500)
+    assert targets.protein_g == round(90 * 2.2)
+
+
+@pytest.mark.parametrize(
+    "calories,goal",
+    [
+        (1600, Goal.CUT),
+        (2000, Goal.MAINTAIN),
+        (2200, Goal.MAINTAIN),
+        (2800, Goal.BULK),
+        (3200, Goal.BULK),
+    ],
+)
+def test_macros_stay_calorie_consistent_across_targets_and_goals(calories, goal):
+    targets = macros_for_calories(
+        calories, weight_kg=80, goal=goal, reference_calories=2400
+    )
+    reconstructed = targets.protein_g * 4 + targets.carbs_g * 4 + targets.fat_g * 9
+    assert reconstructed == pytest.approx(calories, abs=5)
+    assert targets.protein_g > 0
+    assert targets.carbs_g >= 0
+    assert targets.fat_g > 0
+
+
+def test_protein_fraction_is_clamped_for_extreme_reference_ratio():
+    # A tiny reference calorie count relative to bodyweight would imply an
+    # absurd protein percentage (>45% of calories) — must clamp rather
+    # than produce a nutritionally nonsensical split.
+    targets = macros_for_calories(1200, weight_kg=150, goal=Goal.CUT, reference_calories=1200)
+    protein_calories = targets.protein_g * 4
+    assert protein_calories / 1200 <= 0.46  # clamp is 0.45, allow rounding slack
