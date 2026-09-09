@@ -18,6 +18,10 @@ class Settings(BaseSettings):
 
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
+    # Publishable/anon key — not secret, but kept out of source anyway.
+    # Used only by tests that need to exercise RLS as a real client would
+    # (the backend's own runtime code always uses the service-role key).
+    supabase_anon_key: str | None = None
 
     gemini_api_key: str | None = None
     gemini_primary_model: str = "gemini-3.6-flash"
