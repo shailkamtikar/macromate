@@ -12,6 +12,8 @@ export type ActivityLevel =
 export type Goal = "cut" | "maintain" | "bulk";
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
+export type MacroMode = "automatic" | "custom";
+
 export interface MacroTargetsRequest {
   weight_kg: number;
   height_cm: number;
@@ -19,6 +21,15 @@ export interface MacroTargetsRequest {
   sex: BiologicalSex;
   activity_level: ActivityLevel;
   goal: Goal;
+  // Required for cut/bulk; ignored for maintain.
+  rate_kg_per_week?: number | null;
+  // Nudges the recommended calorie target; omit to use the recommendation
+  // as-is.
+  calorie_override?: number | null;
+  macro_mode?: MacroMode;
+  custom_protein_g?: number | null;
+  custom_carbs_g?: number | null;
+  custom_fat_g?: number | null;
 }
 
 export interface MacroTargets {
@@ -31,9 +42,25 @@ export interface MacroTargets {
 export interface MacroTargetsResponse {
   bmi: number;
   bmi_category: string;
+  bmr: number;
+  recommended_calories: number;
   targets: MacroTargets;
   water_goal_ml: number;
 }
+
+// Weight-loss/gain rate options surfaced in onboarding + profile. Must
+// match the bounds enforced server-side in app/domain/macros.py.
+export const CUT_RATE_OPTIONS_KG_PER_WEEK = [0.5, 0.75, 1.0] as const;
+export const BULK_RATE_OPTIONS_KG_PER_WEEK = [0.25] as const;
+// A user may nudge the recommended calorie target by up to this many kcal
+// in either direction — mirrors CALORIE_OVERRIDE_TOLERANCE_KCAL server-side.
+export const CALORIE_OVERRIDE_TOLERANCE_KCAL = 500;
+// Custom macros' implied calories must land within this fraction of the
+// calorie target — mirrors MACRO_CALORIE_TOLERANCE_PCT server-side. Used
+// only for an instant client-side preview; the server call is still the
+// authoritative validation.
+export const MACRO_CALORIE_TOLERANCE_PCT = 0.05;
+export const MIN_SAFE_DAILY_CALORIES = 1200;
 
 export interface FoodItem {
   id: string;

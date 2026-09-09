@@ -88,11 +88,27 @@ test("login -> onboarding -> log food -> log water -> Today reflects it", async 
     // Fresh user has no profile yet -> Today redirects to onboarding.
     await expect(page).toHaveURL(/\/onboarding/, { timeout: 10_000 });
 
+    // Step 1: basics.
     await page.getByLabel("Username").fill(`e2euser${Date.now() % 100000}`);
     await page.getByLabel("Weight (kg)").fill("75");
     await page.getByLabel("Height (cm)").fill("178");
     await page.getByLabel("Age").fill("28");
-    await page.getByRole("button", { name: "Save & continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // Step 2: activity level — the dedicated education step; pick one.
+    await expect(page.getByText("Moderately active")).toBeVisible();
+    await page.getByRole("button", { name: /Moderately active/ }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // Step 3: goal & pace — default "Maintain" needs no rate selection.
+    await expect(page.getByRole("button", { name: "Maintain" })).toBeVisible();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // Step 4: targets — wait for the deterministic backend calculation
+    // before submitting.
+    const submitButton = page.getByRole("button", { name: "Save & continue" });
+    await expect(submitButton).toBeEnabled({ timeout: 10_000 });
+    await submitButton.click();
 
     await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
     await expect(page.getByText("Today's Balance")).toBeVisible();

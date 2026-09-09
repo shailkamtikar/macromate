@@ -74,11 +74,18 @@ test("profile edit recalculates targets and persists; dark mode toggle persists"
     await page.getByRole("link", { name: "Profile & settings" }).click();
     await expect(page).toHaveURL(/\/profile/);
 
-    // Change goal to "Cut" and weight, then save — should recalculate a
-    // lower calorie target through the real backend.
+    // Change goal to "Cut", pick a weight-loss rate, and weight, then save
+    // — should recalculate a lower calorie target through the real backend.
     await page.getByRole("button", { name: "Cut" }).click();
+    await page.getByRole("button", { name: "Lose 0.5 kg/week", exact: false }).click();
     await page.getByLabel("Current weight (kg)").fill("80");
-    await page.getByRole("button", { name: "Save & recalculate targets" }).click();
+
+    const saveButton = page.getByRole("button", { name: "Save & recalculate targets" });
+    // Targets recalculate asynchronously (debounced call to the real
+    // deterministic backend) — wait for that to finish before saving,
+    // rather than racing it.
+    await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+    await saveButton.click();
     await expect(page.getByText("Saved — targets recalculated.")).toBeVisible({
       timeout: 10_000,
     });

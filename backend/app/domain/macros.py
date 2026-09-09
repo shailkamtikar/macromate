@@ -61,6 +61,32 @@ _GOAL_PROTEIN_G_PER_KG: dict[Goal, float] = {
 # Fat as a fraction of total daily calories; remainder goes to carbs.
 _FAT_CALORIE_FRACTION = 0.25
 
+# Standard estimate: ~7700 kcal of deficit/surplus per kg of body weight
+# change (the widely-cited "3500 kcal per lb" rule converted to kg).
+KG_PER_WEEK_TO_DAILY_KCAL = 7700 / 7
+
+# Rate choices surfaced in onboarding/profile. Loss is capped at 1 kg/week —
+# already the generally-accepted safe upper bound for sustainable fat loss.
+# Gain is offered as a single "lean bulk" rate to limit fat gain, per PRD.
+CUT_RATE_OPTIONS_KG_PER_WEEK: tuple[float, ...] = (0.5, 0.75, 1.0)
+BULK_RATE_OPTIONS_KG_PER_WEEK: tuple[float, ...] = (0.25,)
+MAX_CUT_RATE_KG_PER_WEEK = 1.0
+MAX_BULK_RATE_KG_PER_WEEK = 0.5  # server-side ceiling; UI only ever offers 0.25
+
+# Absolute safety floor for a daily calorie target, regardless of how large
+# a deficit the selected rate implies. 1200 kcal/day is a widely-cited
+# minimum for adults; never automatically recommend or accept less.
+MIN_SAFE_DAILY_CALORIES = 1200
+
+# A user may nudge the recommended calorie target up/down by at most this
+# many kcal — enough to matter, not enough to silently create an unsafe or
+# nonsensical target.
+CALORIE_OVERRIDE_TOLERANCE_KCAL = 500
+
+# Custom macros' implied calories (protein*4 + carbs*4 + fat*9) must land
+# within this fraction of the selected calorie target.
+MACRO_CALORIE_TOLERANCE_PCT = 0.05
+
 BMI_CATEGORIES: tuple[tuple[float, str], ...] = (
     (18.5, "underweight"),
     (25.0, "healthy"),
@@ -113,6 +139,119 @@ def calculate_tdee(bmr: float, activity_level: ActivityLevel) -> float:
     return bmr * _ACTIVITY_MULTIPLIERS[activity_level]
 
 
+def calorie_adjustment_for_rate(goal: Goal, rate_kg_per_week: float) -> int:
+    """Daily calorie adjustment implied by a target weekly weight-change
+    rate. Bounded per goal so an onboarding/profile caller can't request an
+    obviously unsafe deficit or surplus."""
+    if goal is Goal.MAINTAIN:
+        return 0
+    if goal is Goal.CUT:
+        if not (0 < rate_kg_per_week <= MAX_CUT_RATE_KG_PER_WEEK):
+            raise ValueError(
+                f"Weight-loss rate must be between 0 and {MAX_CUT_RATE_KG_PER_WEEK} kg/week"
+            )
+        return -round(rate_kg_per_week * KG_PER_WEEK_TO_DAILY_KCAL)
+    if goal is Goal.BULK:
+        if not (0 < rate_kg_per_week <= MAX_BULK_RATE_KG_PER_WEEK):
+            raise ValueError(
+                f"Weight-gain rate must be between 0 and {MAX_BULK_RATE_KG_PER_WEEK} kg/week"
+            )
+        return round(rate_kg_per_week * KG_PER_WEEK_TO_DAILY_KCAL)
+    raise ValueError(f"Unknown goal: {goal}")
+
+
+def safe_calorie_floor(bmr: float) -> int:
+    """A recommended or user-adjusted calorie target should never drop
+    below this, regardless of goal/rate — eating under BMR (or under the
+    generally-cited 1200 kcal/day floor) isn't a sustainable target."""
+    return max(MIN_SAFE_DAILY_CALORIES, round(bmr))
+
+
+def macros_for_calories(calories: int, weight_kg: float, goal: Goal) -> MacroTargets:
+    """Splits an already-decided calorie target into protein/fat/carbs.
+    Shared by the recommended-target pipeline and by "recompute macros
+    after the user overrode calories" — the split logic is identical
+    either way, only where `calories` came from differs."""
+    protein_g = round(weight_kg * _GOAL_PROTEIN_G_PER_KG[goal])
+    fat_g = round((calories * _FAT_CALORIE_FRACTION) / 9)
+    remaining_calories_for_carbs = calories - (protein_g * 4) - (fat_g * 9)
+    carbs_g = max(round(remaining_calories_for_carbs / 4), 0)
+    return MacroTargets(calories=calories, protein_g=protein_g, carbs_g=carbs_g, fat_g=fat_g)
+
+
+@dataclass(frozen=True)
+class RecommendedCalories:
+    calories: int
+    bmr: int
+    tdee: int
+
+
+def calculate_recommended_calories(
+    weight_kg: float,
+    height_cm: float,
+    age_years: int,
+    sex: BiologicalSex,
+    activity_level: ActivityLevel,
+    goal: Goal,
+    rate_kg_per_week: float | None = None,
+) -> RecommendedCalories:
+    """BMR -> TDEE -> goal/rate-adjusted calories, floored at a safe
+    minimum. `rate_kg_per_week` is required for cut/bulk (validated by
+    calorie_adjustment_for_rate); omitting it falls back to the previous
+    fixed per-goal adjustment for backward compatibility."""
+    bmr = calculate_bmr(weight_kg, height_cm, age_years, sex)
+    tdee = calculate_tdee(bmr, activity_level)
+    if rate_kg_per_week is not None:
+        adjustment = calorie_adjustment_for_rate(goal, rate_kg_per_week)
+    else:
+        adjustment = _GOAL_CALORIE_ADJUSTMENT[goal]
+    calories = max(round(tdee + adjustment), safe_calorie_floor(bmr))
+    return RecommendedCalories(calories=calories, bmr=round(bmr), tdee=round(tdee))
+
+
+def validate_calorie_override(calories: int, recommended: int, bmr: float) -> None:
+    """A user may nudge the recommended target, but not past the safety
+    floor and not by more than the allowed tolerance in either direction —
+    prevents silently creating a mathematically-unsafe or nonsensical
+    target through the slider/input."""
+    floor = safe_calorie_floor(bmr)
+    if calories < floor:
+        raise ValueError(
+            f"Calorie target can't go below {floor} kcal/day — that's below what your "
+            "body needs at rest."
+        )
+    if abs(calories - recommended) > CALORIE_OVERRIDE_TOLERANCE_KCAL:
+        raise ValueError(
+            f"Calorie target can only be adjusted by up to {CALORIE_OVERRIDE_TOLERANCE_KCAL} "
+            f"kcal from the recommended {recommended} kcal."
+        )
+
+
+def validate_custom_macros(
+    protein_g: float, carbs_g: float, fat_g: float, target_calories: int
+) -> None:
+    """Custom macros must roughly add up to the calorie target — rejects
+    contradictory input with a specific, actionable message rather than
+    silently accepting numbers that don't reconcile."""
+    if protein_g < 0 or carbs_g < 0 or fat_g < 0:
+        raise ValueError("Macro grams can't be negative.")
+    implied = protein_g * 4 + carbs_g * 4 + fat_g * 9
+    lower = target_calories * (1 - MACRO_CALORIE_TOLERANCE_PCT)
+    upper = target_calories * (1 + MACRO_CALORIE_TOLERANCE_PCT)
+    if not (lower <= implied <= upper):
+        diff = round(implied - target_calories)
+        if diff > 0:
+            verb, amount = "reduce", diff
+        else:
+            verb, amount = "increase", -diff
+        raise ValueError(
+            f"These macros imply {round(implied)} kcal, which is {abs(diff)} kcal "
+            f"{'over' if diff > 0 else 'under'} your {target_calories} kcal target. "
+            f"Try adjusting protein/carbs/fat to {verb} the total by about {amount} kcal, "
+            "or change your calorie target instead."
+        )
+
+
 def calculate_macro_targets(
     weight_kg: float,
     height_cm: float,
@@ -120,20 +259,14 @@ def calculate_macro_targets(
     sex: BiologicalSex,
     activity_level: ActivityLevel,
     goal: Goal,
+    rate_kg_per_week: float | None = None,
 ) -> MacroTargets:
-    """Full pipeline: BMR -> TDEE -> goal-adjusted calories -> macro split."""
-    bmr = calculate_bmr(weight_kg, height_cm, age_years, sex)
-    tdee = calculate_tdee(bmr, activity_level)
-    calories = round(tdee + _GOAL_CALORIE_ADJUSTMENT[goal])
-
-    protein_g = round(weight_kg * _GOAL_PROTEIN_G_PER_KG[goal])
-    fat_g = round((calories * _FAT_CALORIE_FRACTION) / 9)
-    remaining_calories_for_carbs = calories - (protein_g * 4) - (fat_g * 9)
-    carbs_g = max(round(remaining_calories_for_carbs / 4), 0)
-
-    return MacroTargets(
-        calories=calories, protein_g=protein_g, carbs_g=carbs_g, fat_g=fat_g
+    """Full pipeline: BMR -> TDEE -> goal/rate-adjusted calories -> macro
+    split."""
+    recommended = calculate_recommended_calories(
+        weight_kg, height_cm, age_years, sex, activity_level, goal, rate_kg_per_week
     )
+    return macros_for_calories(recommended.calories, weight_kg, goal)
 
 
 def suggested_water_goal_ml(weight_kg: float, activity_level: ActivityLevel) -> int:

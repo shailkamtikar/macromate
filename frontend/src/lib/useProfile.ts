@@ -19,6 +19,8 @@ export interface Profile {
   water_goal_ml: number | null;
   leaderboard_visible: boolean;
   timezone: string;
+  rate_kg_per_week: number | null;
+  macro_mode: "automatic" | "custom";
 }
 
 export function useProfile(userId: string | undefined) {

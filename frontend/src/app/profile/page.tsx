@@ -7,26 +7,23 @@ import {
   DietaryMode,
   GlassSize,
   Goal,
+  MacroMode,
+  MacroTargetsResponse,
   NotificationSettings,
   createGlassSize,
   deleteGlassSize,
   fetchGlassSizes,
-  fetchMacroTargets,
   fetchNotificationSettings,
   updateNotificationSettings,
 } from "@/lib/api";
+import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
+import { RatePicker } from "@/components/RatePicker";
+import { TargetsEditor } from "@/components/TargetsEditor";
 import { supabase } from "@/lib/supabaseClient";
 import { Profile, useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
-  sedentary: "Sedentary",
-  light: "Lightly active",
-  moderate: "Moderately active",
-  active: "Active",
-  very_active: "Very active",
-};
 const GOAL_LABELS: Record<Goal, string> = { cut: "Cut", maintain: "Maintain", bulk: "Bulk" };
 const DIET_LABELS: Record<DietaryMode, string> = {
   vegetarian: "Vegetarian",
@@ -40,7 +37,17 @@ export default function ProfilePage() {
   const profile = useProfile(session?.user.id);
 
   const [form, setForm] = useState<Partial<Profile>>({});
-  const [weightKg, setWeightKg] = useState(75);
+
+  // The user's real current weight lives in weight_logs (most recent
+  // entry), not on the profiles row — this must load the actual latest
+  // value and never fall back to a hardcoded placeholder.
+  const [latestWeightKg, setLatestWeightKg] = useState<number | null | undefined>(undefined);
+  const [weightKg, setWeightKg] = useState<number | null>(null);
+
+  const [rateKgPerWeek, setRateKgPerWeek] = useState<number | null>(null);
+  const [macroMode, setMacroMode] = useState<MacroMode>("automatic");
+  const [targetsResult, setTargetsResult] = useState<MacroTargetsResponse | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
@@ -52,17 +59,33 @@ export default function ProfilePage() {
   const [notif, setNotif] = useState<NotificationSettings | null>(null);
 
   useEffect(() => {
+    if (!profile) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local edit state when the loaded profile arrives
-    if (profile) setForm(profile);
+    setForm(profile);
+    setRateKgPerWeek(profile.rate_kg_per_week);
+    setMacroMode(profile.macro_mode);
   }, [profile]);
 
   useEffect(() => {
     if (!session) return;
     fetchGlassSizes().then(setGlassSizes).catch(() => {});
     fetchNotificationSettings().then(setNotif).catch(() => {});
+
+    supabase
+      .from("weight_logs")
+      .select("weight_kg")
+      .eq("user_id", session.user.id)
+      .order("logged_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        const value = data?.weight_kg ?? null;
+        setLatestWeightKg(value);
+        setWeightKg(value);
+      });
   }, [session]);
 
-  if (sessionLoading || profile === undefined) {
+  if (sessionLoading || profile === undefined || latestWeightKg === undefined) {
     return <p className="p-10 text-sm text-on-surface-variant">Loading…</p>;
   }
   if (!session || !profile) {
@@ -82,21 +105,28 @@ export default function ProfilePage() {
   const currentSession = session;
   const currentProfile = profile;
 
+  const effectiveGoal = (form.goal ?? currentProfile.goal) as Goal;
+  // Never fall back to a placeholder weight (0, 75, or otherwise) — if
+  // there's genuinely no known weight yet, target calculation simply
+  // doesn't run until the user enters one (see the TargetsEditor guard
+  // below), rather than silently computing against a fake number.
+  const effectiveWeight = weightKg ?? latestWeightKg ?? null;
+  const hasValidWeight = effectiveWeight !== null && effectiveWeight > 0;
+
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
+    if (!hasValidWeight) {
+      setSaveError("Enter your current weight before saving.");
+      return;
+    }
+    if (!targetsResult) {
+      setSaveError("Targets haven't finished calculating yet — wait a moment and try again.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     setSaveNotice(null);
     try {
-      const { targets, water_goal_ml } = await fetchMacroTargets({
-        weight_kg: weightKg,
-        height_cm: form.height_cm ?? currentProfile.height_cm,
-        age_years: form.age_years ?? currentProfile.age_years,
-        sex: (form.sex ?? currentProfile.sex) as "male" | "female",
-        activity_level: (form.activity_level ?? currentProfile.activity_level) as ActivityLevel,
-        goal: (form.goal ?? currentProfile.goal) as Goal,
-      });
-
       const { error } = await supabase
         .from("profiles")
         .update({
@@ -105,21 +135,30 @@ export default function ProfilePage() {
           age_years: form.age_years ?? currentProfile.age_years,
           height_cm: form.height_cm ?? currentProfile.height_cm,
           activity_level: form.activity_level ?? currentProfile.activity_level,
-          goal: form.goal ?? currentProfile.goal,
+          goal: effectiveGoal,
+          rate_kg_per_week: effectiveGoal === "maintain" ? null : rateKgPerWeek,
+          macro_mode: macroMode,
           dietary_mode: form.dietary_mode ?? "non_vegetarian",
           leaderboard_visible: form.leaderboard_visible ?? currentProfile.leaderboard_visible,
-          target_calories: targets.calories,
-          target_protein_g: targets.protein_g,
-          target_carbs_g: targets.carbs_g,
-          target_fat_g: targets.fat_g,
-          water_goal_ml,
+          target_calories: targetsResult.targets.calories,
+          target_protein_g: targetsResult.targets.protein_g,
+          target_carbs_g: targetsResult.targets.carbs_g,
+          target_fat_g: targetsResult.targets.fat_g,
+          water_goal_ml: targetsResult.water_goal_ml,
         })
         .eq("id", currentSession.user.id);
       if (error) throw error;
 
-      await supabase
-        .from("weight_logs")
-        .insert({ user_id: currentSession.user.id, weight_kg: weightKg });
+      // Only log a new weight entry if it actually changed — avoids
+      // spamming weight_logs (and skewing the weight trend graph) with a
+      // duplicate row every time the user saves unrelated settings.
+      if (weightKg !== null && weightKg !== latestWeightKg) {
+        const { error: weightError } = await supabase
+          .from("weight_logs")
+          .insert({ user_id: currentSession.user.id, weight_kg: weightKg });
+        if (weightError) throw weightError;
+        setLatestWeightKg(weightKg);
+      }
 
       setSaveNotice("Saved — targets recalculated.");
     } catch (err) {
@@ -179,7 +218,7 @@ export default function ProfilePage() {
               Current weight (kg)
               <input
                 type="number"
-                value={weightKg}
+                value={weightKg ?? ""}
                 onChange={(e) => setWeightKg(Number(e.target.value))}
                 className="input"
               />
@@ -209,9 +248,9 @@ export default function ProfilePage() {
                 onChange={(e) => setForm({ ...form, activity_level: e.target.value as ActivityLevel })}
                 className="input"
               >
-                {Object.entries(ACTIVITY_LABELS).map(([v, l]) => (
+                {ACTIVITY_LEVEL_ORDER.map((v) => (
                   <option key={v} value={v}>
-                    {l}
+                    {ACTIVITY_LEVEL_INFO[v].label}
                   </option>
                 ))}
               </select>
@@ -235,9 +274,12 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   key={v}
-                  onClick={() => setForm({ ...form, goal: v })}
+                  onClick={() => {
+                    setForm({ ...form, goal: v });
+                    setRateKgPerWeek(null);
+                  }}
                   className={`flex-1 rounded-[var(--radius-control)] px-3 py-2 text-sm font-semibold ${
-                    (form.goal ?? profile.goal) === v
+                    effectiveGoal === v
                       ? "bg-primary text-on-primary"
                       : "bg-surface-container text-on-surface-variant"
                   }`}
@@ -248,6 +290,15 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          {effectiveGoal !== "maintain" && (
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-on-surface">
+                {effectiveGoal === "cut" ? "Weight-loss" : "Weight-gain"} rate
+              </p>
+              <RatePicker goal={effectiveGoal} value={rateKgPerWeek} onChange={setRateKgPerWeek} />
+            </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm text-on-surface">
             <input
               type="checkbox"
@@ -257,9 +308,41 @@ export default function ProfilePage() {
             Show me on friends&apos; leaderboards
           </label>
 
+          <div>
+            <p className="mb-2 text-sm font-semibold text-on-surface">Calorie &amp; macro targets</p>
+            {hasValidWeight ? (
+              <TargetsEditor
+                weightKg={effectiveWeight as number}
+                heightCm={form.height_cm ?? currentProfile.height_cm}
+                ageYears={form.age_years ?? currentProfile.age_years}
+                sex={(form.sex ?? currentProfile.sex) as "male" | "female"}
+                activityLevel={(form.activity_level ?? currentProfile.activity_level) as ActivityLevel}
+                goal={effectiveGoal}
+                rateKgPerWeek={rateKgPerWeek}
+                onResult={setTargetsResult}
+                onMacroModeChange={setMacroMode}
+                initialCalorieOverride={currentProfile.target_calories}
+                initialMacroMode={currentProfile.macro_mode}
+                initialCustomMacros={
+                  currentProfile.macro_mode === "custom"
+                    ? {
+                        protein_g: currentProfile.target_protein_g,
+                        carbs_g: currentProfile.target_carbs_g,
+                        fat_g: currentProfile.target_fat_g,
+                      }
+                    : null
+                }
+              />
+            ) : (
+              <p className="rounded-[var(--radius-card)] border border-dashed border-outline-variant bg-surface-container-lowest p-4 text-xs text-on-surface-variant">
+                Enter your current weight above to calculate targets.
+              </p>
+            )}
+          </div>
+
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || !hasValidWeight || !targetsResult}
             className="w-full rounded-[var(--radius-control)] bg-primary py-3 text-sm font-semibold text-on-primary disabled:opacity-60"
           >
             {saving ? "Saving…" : "Save & recalculate targets"}
