@@ -173,7 +173,7 @@ export default function TodayPage() {
 
   return (
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
-      <div className="w-full max-w-2xl space-y-4">
+      <div className="w-full max-w-2xl space-y-4 lg:max-w-5xl">
         <header className="flex items-center justify-between pt-1">
           <div>
             <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
@@ -205,6 +205,7 @@ export default function TodayPage() {
           </p>
         )}
 
+        <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
         {/* Calorie hero card */}
         <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
           <div className="flex items-center justify-between">
@@ -382,6 +383,8 @@ export default function TodayPage() {
           onQuickLog={handleQuickWater}
           onGlassAdded={reloadDay}
         />
+
+        </div>
 
         {/* Meal timeline */}
         <section className="space-y-3">
