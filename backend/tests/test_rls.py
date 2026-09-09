@@ -113,6 +113,145 @@ def test_user_can_only_see_own_weight_logs(two_users):
     assert b_view.json() == []
 
 
+def test_user_can_only_see_own_food_logs(two_users):
+    a, b = two_users["a"], two_users["b"]
+    admin_headers = {
+        "apikey": settings.supabase_service_role_key,
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+    }
+
+    food_resp = httpx.post(
+        f"{settings.supabase_url}/rest/v1/food_items",
+        headers={**admin_headers, "Content-Type": "application/json", "Prefer": "return=representation"},
+        json={
+            "name": f"__test_rls_food_logs_{uuid.uuid4().hex[:8]}",
+            "serving_description": "1 unit",
+            "calories": 100,
+            "protein_g": 5,
+            "carbs_g": 10,
+            "fat_g": 2,
+        },
+        timeout=15,
+    )
+    food_id = food_resp.json()[0]["id"]
+
+    try:
+        insert_resp = httpx.post(
+            f"{settings.supabase_url}/rest/v1/food_logs",
+            headers=_rest_headers(a["token"]),
+            json={
+                "user_id": a["id"],
+                "food_item_id": food_id,
+                "meal_type": "lunch",
+                "quantity": 1,
+                "calories": 100,
+                "protein_g": 5,
+                "carbs_g": 10,
+                "fat_g": 2,
+            },
+            timeout=15,
+        )
+        assert insert_resp.status_code == 201, insert_resp.text
+
+        # User B cannot see A's food log via a direct table query...
+        b_view = httpx.get(
+            f"{settings.supabase_url}/rest/v1/food_logs?user_id=eq.{a['id']}",
+            headers=_rest_headers(b["token"]),
+            timeout=15,
+        )
+        assert b_view.status_code == 200
+        assert b_view.json() == []
+
+        # ...nor by omitting the filter and hoping RLS just narrows the
+        # unfiltered result set to their own rows (B has none, so this
+        # proves RLS isn't merely relying on the client's own WHERE clause).
+        b_unfiltered = httpx.get(
+            f"{settings.supabase_url}/rest/v1/food_logs",
+            headers=_rest_headers(b["token"]),
+            timeout=15,
+        )
+        assert b_unfiltered.status_code == 200
+        assert all(row["user_id"] != a["id"] for row in b_unfiltered.json())
+    finally:
+        httpx.delete(
+            f"{settings.supabase_url}/rest/v1/food_logs?food_item_id=eq.{food_id}",
+            headers=admin_headers,
+            timeout=15,
+        )
+        httpx.delete(
+            f"{settings.supabase_url}/rest/v1/food_items?id=eq.{food_id}",
+            headers=admin_headers,
+            timeout=15,
+        )
+
+
+def test_user_can_only_see_own_chat_history(two_users):
+    a, b = two_users["a"], two_users["b"]
+
+    insert_resp = httpx.post(
+        f"{settings.supabase_url}/rest/v1/chat_history",
+        headers=_rest_headers(a["token"]),
+        json={"user_id": a["id"], "role": "user", "content": "private coach message"},
+        timeout=15,
+    )
+    assert insert_resp.status_code == 201, insert_resp.text
+
+    b_view = httpx.get(
+        f"{settings.supabase_url}/rest/v1/chat_history?user_id=eq.{a['id']}",
+        headers=_rest_headers(b["token"]),
+        timeout=15,
+    )
+    assert b_view.status_code == 200
+    assert b_view.json() == []
+
+
+def test_user_cannot_read_another_users_profile_directly(two_users):
+    # profiles RLS is auth.uid() = id — strictly self-only at the table
+    # level. Cross-user profile visibility (friend search, leaderboard)
+    # only exists through the backend's authorized endpoints, which apply
+    # their own filtering (e.g. friends-only + leaderboard_visible) before
+    # using the service-role key — never through a direct client query.
+    a, b = two_users["a"], two_users["b"]
+
+    create_resp = httpx.post(
+        f"{settings.supabase_url}/rest/v1/profiles",
+        headers=_rest_headers(a["token"]),
+        json={
+            "id": a["id"],
+            "username": f"rlsprofile{uuid.uuid4().hex[:8]}",
+            "sex": "male",
+            "age_years": 30,
+            "height_cm": 175,
+            "activity_level": "moderate",
+            "goal": "maintain",
+            "target_calories": 2000,
+            "target_protein_g": 150,
+            "target_carbs_g": 200,
+            "target_fat_g": 60,
+        },
+        timeout=15,
+    )
+    assert create_resp.status_code == 201, create_resp.text
+
+    # A can read their own profile.
+    a_view = httpx.get(
+        f"{settings.supabase_url}/rest/v1/profiles?id=eq.{a['id']}",
+        headers=_rest_headers(a["token"]),
+        timeout=15,
+    )
+    assert len(a_view.json()) == 1
+
+    # B cannot read A's profile via a direct table query, even though the
+    # row genuinely exists.
+    b_view = httpx.get(
+        f"{settings.supabase_url}/rest/v1/profiles?id=eq.{a['id']}",
+        headers=_rest_headers(b["token"]),
+        timeout=15,
+    )
+    assert b_view.status_code == 200
+    assert b_view.json() == []
+
+
 def test_user_cannot_insert_row_impersonating_another_user(two_users):
     a, b = two_users["a"], two_users["b"]
 
