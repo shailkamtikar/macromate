@@ -78,8 +78,9 @@ export default function CoachPage() {
             <p className="text-sm text-on-surface-variant">Loading…</p>
           ) : messages.length === 0 ? (
             <p className="rounded-[var(--radius-card)] border border-dashed border-outline-variant p-4 text-sm text-on-surface-variant">
-              Ask something like &quot;How much protein do I have left?&quot; or &quot;What&apos;s
-              my BMI?&quot;
+              Ask something like &quot;How much protein do I have left?&quot;, &quot;How
+              many calories are in 200g paneer?&quot;, or &quot;Add 3 eggs to
+              breakfast.&quot;
             </p>
           ) : (
             messages.map((m, i) => (
@@ -91,7 +92,15 @@ export default function CoachPage() {
                     : "bg-surface-container-lowest text-on-surface shadow-sm"
                 }`}
               >
-                {m.content}
+                <p>{m.content}</p>
+                {m.action && (
+                  <a
+                    href="/today"
+                    className="mt-1.5 inline-block text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                  >
+                    View in Today
+                  </a>
+                )}
               </div>
             ))
           )}

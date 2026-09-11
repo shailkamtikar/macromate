@@ -28,6 +28,7 @@ def _in_quiet_hours(now: time, quiet_start: time | None, quiet_end: time | None)
 def evaluate_triggers(
     *,
     now_time: time,
+    notifications_enabled: bool = True,
     logging_reminders_enabled: bool,
     reminder_times: list[time],
     streak_warnings_enabled: bool,
@@ -40,6 +41,11 @@ def evaluate_triggers(
     remaining_protein_g: int,
     target_protein_g: int,
 ) -> list[NotificationTrigger]:
+    # The master switch always wins -- no category fires while it's off,
+    # regardless of any individual category flag.
+    if not notifications_enabled:
+        return []
+
     if _in_quiet_hours(now_time, quiet_hours_start, quiet_hours_end):
         return []
 

@@ -39,11 +39,33 @@ export interface MacroTargets {
   fat_g: number;
 }
 
+export type CapReason = "tdee_fraction" | "bodyweight_percent" | "absolute_floor";
+
 export interface MacroTargetsResponse {
   bmi: number;
   bmi_category: string;
   bmr: number;
+  /** Estimated TDEE / maintenance calories — no cut/bulk adjustment.
+   * Identical to maintenance_calories; both are present since the UI
+   * shows this as a distinct, named "estimated maintenance" figure. */
+  tdee: number;
+  maintenance_calories: number;
   recommended_calories: number;
+  /** The rate the user actually asked for — null for maintain, or if the
+   * request omitted it. */
+  requested_rate_kg_per_week: number | null;
+  /** The rate actually applied after the safety/feasibility policy —
+   * equals requested_rate_kg_per_week unless is_rate_capped is true. */
+  applied_rate_kg_per_week: number | null;
+  is_rate_capped: boolean;
+  cap_reason: CapReason | null;
+  /** Calm, ready-to-display explanation of why the rate was capped. */
+  cap_explanation: string | null;
+  /** Signed: negative for a cut, positive for a bulk, 0 for maintain. */
+  daily_energy_change_kcal: number;
+  /** Calm, non-medical advisory when the *final* calorie target is
+   * unusually low — never a silent substitution. */
+  low_calorie_warning: string | null;
   targets: MacroTargets;
   water_goal_ml: number;
 }
@@ -62,7 +84,16 @@ export const CALORIE_OVERRIDE_TOLERANCE_KCAL = 500;
 export const MACRO_CALORIE_TOLERANCE_PCT = 0.05;
 export const MIN_SAFE_DAILY_CALORIES = 1200;
 
-export interface FoodItem {
+/** The weight of one serving, when the food's serving description states
+ * one ("100g", "1 bowl (150 g)"). Null when it doesn't — the UI then offers
+ * servings only rather than inventing a gram equivalent. */
+export interface ServingBasis {
+  serving_description?: string | null;
+  serving_weight?: number | null;
+  serving_weight_unit?: string | null;
+}
+
+export interface FoodItem extends ServingBasis {
   id: string;
   name: string;
   brand: string | null;
@@ -73,7 +104,18 @@ export interface FoodItem {
   fat_g: number;
   verified: boolean;
   created_by: string | null;
+  /** True for the caller's own reusable food created from an accepted AI
+   * estimate -- never verified, never visible to other users. */
+  is_ai_estimate?: boolean;
   similarity?: number | null;
+  /** Only present on recent/frequent results. */
+  log_count?: number | null;
+  last_logged_at?: string | null;
+}
+
+export interface RecentFoodsResponse {
+  recent: FoodItem[];
+  frequent: FoodItem[];
 }
 
 export interface CreateFoodRequest {
@@ -95,7 +137,7 @@ export interface CreateFoodResponse {
   possible_duplicates: FoodItem[];
 }
 
-export interface FoodLog {
+export interface FoodLog extends ServingBasis {
   id: string;
   food_item_id: string;
   food_name: string;
@@ -106,6 +148,10 @@ export interface FoodLog {
   carbs_g: number;
   fat_g: number;
   logged_at: string;
+  // "database" for a verified/user-custom food (the only value before
+  // Phase 3); "ai_estimate" when this log's nutrition came from a Gemini
+  // estimate with no confident database match.
+  source: "database" | "ai_estimate";
 }
 
 export interface GlassSize {
@@ -206,10 +252,19 @@ export async function fetchFoodLogs(date: string): Promise<FoodLog[]> {
   return res.json();
 }
 
-export async function updateFoodLog(logId: string, quantity: number): Promise<FoodLog> {
+export async function fetchRecentFoods(): Promise<RecentFoodsResponse> {
+  const res = await authFetch("/api/foods/recent");
+  return res.json();
+}
+
+/** Change an entry's quantity, move it to another meal, or both. */
+export async function updateFoodLog(
+  logId: string,
+  changes: { quantity?: number; meal_type?: MealType },
+): Promise<FoodLog> {
   const res = await authFetch(`/api/food-logs/${logId}`, {
     method: "PATCH",
-    body: JSON.stringify({ quantity }),
+    body: JSON.stringify(changes),
   });
   return res.json();
 }
@@ -251,20 +306,61 @@ export async function logWater(volume_ml: number): Promise<WaterLog> {
   return res.json();
 }
 
+/** Undo one container's worth of today's water, newest entry first —
+ * the "−" control on the glass tracker. Returns the corrected summary. */
+export async function removeWater(volume_ml: number): Promise<WaterSummary> {
+  const res = await authFetch("/api/water-logs/remove", {
+    method: "POST",
+    body: JSON.stringify({ volume_ml }),
+  });
+  return res.json();
+}
+
 export async function deleteWaterLog(id: string): Promise<void> {
   await authFetch(`/api/water-logs/${id}`, { method: "DELETE" });
 }
 
-export interface ParsedFoodItem {
+export interface FoodCandidate {
+  food_item_id: string | null;
+  food_name: string;
+  serving_description: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  serving_weight: number | null;
+  serving_weight_unit: string | null;
+}
+
+/** The literal amount+unit Gemini extracted from the text (e.g. "200g" ->
+ * amount 200, unit "g"), before any conversion — see calculate-foods'
+ * backend docstring for why the conversion itself never happens in Gemini. */
+export type ParsedUnit = "g" | "ml" | "serving";
+
+/** "database" for a real, matched food_items row; "ai_estimate" when no
+ * confident match existed and Gemini's own nutrition estimate was used
+ * instead (never presented as verified). null only while `ambiguous`. */
+export type NutritionSource = "database" | "ai_estimate" | null;
+
+export interface ParsedFoodItem extends ServingBasis {
   raw_phrase: string;
+  search_name: string;
+  amount: number;
+  unit: ParsedUnit;
   resolved: boolean;
+  ambiguous: boolean;
+  source: NutritionSource;
+  quantity_is_assumption: boolean;
   food_item_id: string | null;
   food_name: string | null;
-  quantity_multiplier: number;
+  quantity: number | null;
   calories: number | null;
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  assumption: string | null;
+  candidates: FoodCandidate[] | null;
+  estimate: FoodCandidate | null;
 }
 
 export interface CalculateFoodsResponse {
@@ -280,11 +376,40 @@ export async function calculateFoodsWithAi(text: string): Promise<CalculateFoods
   return res.json();
 }
 
+/** An AI-estimated food's nutrition per 1 unit of `quantity` passed to
+ * logAiEstimateFood — mirrors the backend's AiEstimateInput shape. */
+export interface AiEstimateInput {
+  name: string;
+  serving_description: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+/** Logs an AI-estimated food (no database match) -- creates its backing
+ * food_items row server-side and a food_logs row flagged
+ * source="ai_estimate", via the same /api/food-logs endpoint `logFood`
+ * uses. */
+export async function logAiEstimateFood(
+  estimate: AiEstimateInput,
+  meal_type: MealType,
+  quantity: number,
+): Promise<FoodLog> {
+  const res = await authFetch("/api/food-logs", {
+    method: "POST",
+    body: JSON.stringify({ ai_estimate: estimate, meal_type, quantity }),
+  });
+  return res.json();
+}
+
 export interface NotificationSettings {
+  notifications_enabled: boolean;
   logging_reminders_enabled: boolean;
   reminder_times: string[];
   streak_warnings_enabled: boolean;
   macro_nudges_enabled: boolean;
+  friend_activity_enabled: boolean;
   quiet_hours_start: string | null;
   quiet_hours_end: string | null;
 }
@@ -301,6 +426,17 @@ export async function updateNotificationSettings(
     method: "PUT",
     body: JSON.stringify(settings),
   });
+  return res.json();
+}
+
+export interface NotificationTriggerOut {
+  kind: string;
+  title: string;
+  body: string;
+}
+
+export async function fetchDueTriggers(): Promise<NotificationTriggerOut[]> {
+  const res = await authFetch("/api/notification-settings/check-now");
   return res.json();
 }
 
@@ -349,6 +485,15 @@ export interface LeaderboardEntry {
   discipline_score: number;
   days_logged: number;
   is_self: boolean;
+  current_streak_days: number;
+}
+
+export interface FriendActivityItem {
+  user_id: string;
+  username: string;
+  meal_type: string;
+  logged_at: string;
+  item_count: number;
 }
 
 export async function searchUsers(q: string): Promise<UserSearchResult[]> {
@@ -382,6 +527,11 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   return res.json();
 }
 
+export async function fetchFriendActivity(): Promise<FriendActivityItem[]> {
+  const res = await authFetch("/api/friends/activity");
+  return res.json();
+}
+
 export interface Achievements {
   current_streak_days: number;
   milestones_hit: number[];
@@ -407,6 +557,16 @@ export interface WeekSummary {
   days_logged: number;
   days_goal_hit: number;
   adherence_pct: number;
+  /** Calendar days this summary actually covers -- 7 for any complete
+   * week, fewer only for the currently-in-progress week. */
+  days_in_period: number;
+  is_partial: boolean;
+  protein_days_hit: number;
+  protein_adherence_pct: number;
+  carbs_days_hit: number;
+  carbs_adherence_pct: number;
+  fat_days_hit: number;
+  fat_adherence_pct: number;
 }
 
 export interface WeeklyReport {
@@ -416,10 +576,14 @@ export interface WeeklyReport {
   weight_end_kg: number | null;
   weight_delta_kg: number | null;
   wins: string[];
+  improvement_areas: string[];
 }
 
-export async function fetchWeeklyReport(): Promise<WeeklyReport> {
-  const res = await authFetch("/api/progress/weekly");
+/** `refDate` (YYYY-MM-DD) requests the report for the week containing that
+ * date instead of the current week -- the backend already supports this. */
+export async function fetchWeeklyReport(refDate?: string): Promise<WeeklyReport> {
+  const qs = refDate ? `?ref_date=${encodeURIComponent(refDate)}` : "";
+  const res = await authFetch(`/api/progress/weekly${qs}`);
   return res.json();
 }
 
@@ -439,6 +603,11 @@ export interface SuggestionsResponse {
   message: string;
   remaining_calories: number;
   remaining_protein_g: number;
+  remaining_carbs_g: number;
+  remaining_fat_g: number;
+  /** Whether these suggestions are currently ranked to close a real
+   * protein gap, vs. protein already being on track for the day. */
+  protein_is_priority: boolean;
   suggestions: SuggestedFood[];
 }
 
@@ -478,6 +647,10 @@ export interface CoachMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  // Only set on the direct response to the message that triggered it
+  // (never on history replay) -- lets the UI show a "View in Today" link
+  // when the Coach actually changed the user's data.
+  action?: "add_food" | "remove_food" | "log_water" | null;
 }
 
 export async function fetchCoachHistory(): Promise<CoachMessage[]> {

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { useSession } from "@/lib/useSession";
 
 export default function RootPage() {
@@ -13,5 +14,5 @@ export default function RootPage() {
     router.replace(session ? "/today" : "/login");
   }, [loading, session, router]);
 
-  return <p className="p-10 text-sm text-on-surface-variant">Loading…</p>;
+  return <BootstrapLoader />;
 }

@@ -10,6 +10,19 @@ from datetime import date, timedelta
 
 STREAK_MILESTONES = (3, 7, 14, 30)
 
+# How far back to look for streak calculation -- 60 days is generous
+# headroom above the longest milestone (30) without scanning the user's
+# entire history on every request. Shared by anything that computes a
+# logging streak (the achievements endpoint and the friends leaderboard)
+# so the same streak length is never computed two different ways.
+STREAK_LOOKBACK_DAYS = 60
+
+# A loss smaller than this is ordinary day-to-day fluctuation (water weight,
+# scale noise), not real progress -- never claimed as a win. Matches the
+# same noise-floor convention used for the weekly weight trend
+# (app/domain/progress.py's WEIGHT_TREND_NOISE_FLOOR_KG).
+MEANINGFUL_WEIGHT_LOSS_KG = 0.2
+
 
 @dataclass(frozen=True)
 class AchievementsResult:
@@ -45,12 +58,15 @@ def milestones_reached(streak_days: int) -> list[int]:
 
 def weight_progress(recent_weights_kg: list[tuple[date, float]]) -> tuple[bool, float | None]:
     """Compares the two most recent weight_logs. `recent_weights_kg` must
-    be sorted ascending by date."""
+    be sorted ascending by date. Only a real, meaningful loss (>=
+    MEANINGFUL_WEIGHT_LOSS_KG) counts as progress -- a trivial fluctuation
+    must never be presented as a win."""
     if len(recent_weights_kg) < 2:
         return False, None
     (_, previous), (_, latest) = recent_weights_kg[-2], recent_weights_kg[-1]
     delta = round(latest - previous, 1)
-    return latest < previous, delta
+    meaningful_loss = (previous - latest) >= MEANINGFUL_WEIGHT_LOSS_KG
+    return meaningful_loss, delta
 
 
 def macro_goals_hit(

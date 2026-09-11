@@ -1,15 +1,33 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
+from app.domain.achievements import STREAK_LOOKBACK_DAYS, calculate_logging_streak
 from app.domain.friends import compute_discipline_score, rank_leaderboard
 from app.domain.progress import week_bounds
-from app.domain.timeutil import day_bounds_utc, local_today
+from app.domain.timeutil import day_bounds_utc, local_today, utc_timestamp_to_local_date
 
 router = APIRouter(prefix="/api/friends", tags=["friends"])
+
+# Friend meal activity is intentionally a short, recent window -- a
+# lightweight "what's happening" glance, not a social feed history.
+ACTIVITY_LOOKBACK_DAYS = 2
+MAX_ACTIVITY_ITEMS = 20
+
+
+def _accepted_friend_ids(db: SupabaseAdmin, user_id: str) -> set[str]:
+    as_requester = db.select(
+        "friendships",
+        {"requester_id": f"eq.{user_id}", "status": "eq.accepted", "select": "addressee_id"},
+    )
+    as_addressee = db.select(
+        "friendships",
+        {"addressee_id": f"eq.{user_id}", "status": "eq.accepted", "select": "requester_id"},
+    )
+    return {r["addressee_id"] for r in as_requester} | {r["requester_id"] for r in as_addressee}
 
 
 class UserSearchResult(BaseModel):
@@ -39,6 +57,18 @@ class LeaderboardEntry(BaseModel):
     discipline_score: int
     days_logged: int
     is_self: bool
+    current_streak_days: int
+
+
+class FriendActivityItem(BaseModel):
+    user_id: str
+    username: str
+    meal_type: str
+    # Latest log time within this grouped activity item (ISO 8601) -- the
+    # only timing info exposed. Never calories, macros, food names, or
+    # quantities: friend activity is a presence signal, not a data feed.
+    logged_at: str
+    item_count: int
 
 
 @router.get("/search", response_model=list[UserSearchResult])
@@ -153,15 +183,7 @@ def respond_to_request(
 def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
     db = SupabaseAdmin()
 
-    as_requester = db.select(
-        "friendships",
-        {"requester_id": f"eq.{current_user.user_id}", "status": "eq.accepted", "select": "addressee_id"},
-    )
-    as_addressee = db.select(
-        "friendships",
-        {"addressee_id": f"eq.{current_user.user_id}", "status": "eq.accepted", "select": "requester_id"},
-    )
-    friend_ids = {r["addressee_id"] for r in as_requester} | {r["requester_id"] for r in as_addressee}
+    friend_ids = _accepted_friend_ids(db, current_user.user_id)
     friend_ids.add(current_user.user_id)
 
     id_filter = "(" + ",".join(friend_ids) + ")"
@@ -176,11 +198,14 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
     requester_tz = next(
         (p.get("timezone") for p in profiles if p["id"] == current_user.user_id), None
     ) or "UTC"
-    week_start, _ = week_bounds(local_today(requester_tz))
+    today = local_today(requester_tz)
+    week_start, _ = week_bounds(today)
     start, _ = day_bounds_utc(week_start, requester_tz)
     _, end = day_bounds_utc(week_start + timedelta(days=6), requester_tz)
+    streak_start, _ = day_bounds_utc(today - timedelta(days=STREAK_LOOKBACK_DAYS), requester_tz)
 
     scores = []
+    streaks: dict[str, int] = {}
     for profile in visible_profiles:
         logs = db.select(
             "food_logs",
@@ -201,6 +226,22 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
             )
         )
 
+        # A separate, narrow (logged_at only) query over the longer streak
+        # lookback -- kept independent of the 7-day discipline-score query
+        # above so neither computation risks the other's correctness.
+        streak_logs = db.select(
+            "food_logs",
+            {
+                "user_id": f"eq.{profile['id']}",
+                "logged_at": f"gte.{streak_start.isoformat()}",
+                "select": "logged_at",
+            },
+        )
+        logged_dates = {
+            utc_timestamp_to_local_date(row["logged_at"], requester_tz) for row in streak_logs
+        }
+        streaks[profile["id"]] = calculate_logging_streak(logged_dates, today)
+
     ranked = rank_leaderboard(scores)
     return [
         LeaderboardEntry(
@@ -209,6 +250,71 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
             discipline_score=s.discipline_score,
             days_logged=s.days_logged,
             is_self=s.is_self,
+            current_streak_days=streaks.get(s.user_id, 0),
         )
         for s in ranked
     ]
+
+
+@router.get("/activity", response_model=list[FriendActivityItem])
+def get_friend_activity(current_user: CurrentUserDep) -> list[FriendActivityItem]:
+    """A lightweight "what's happening" glance at accepted friends' recent
+    meal logging -- never their calories, macros, or which foods they ate.
+    One activity item per (friend, meal, day), regardless of how many
+    individual foods were logged in that meal."""
+    db = SupabaseAdmin()
+
+    friend_ids = _accepted_friend_ids(db, current_user.user_id)
+    if not friend_ids:
+        return []
+
+    id_filter = "(" + ",".join(friend_ids) + ")"
+    profiles = db.select(
+        "profiles",
+        {"id": f"in.{id_filter}", "select": "id,username,timezone,leaderboard_visible"},
+    )
+    # Reuses the same opt-out flag as the leaderboard -- a friend who has
+    # opted out of being visible there is also never surfaced in activity.
+    visible = {p["id"]: p for p in profiles if p["leaderboard_visible"]}
+    if not visible:
+        return []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_LOOKBACK_DAYS)
+    vis_id_filter = "(" + ",".join(visible.keys()) + ")"
+    logs = db.select(
+        "food_logs",
+        {
+            "user_id": f"in.{vis_id_filter}",
+            "logged_at": f"gte.{cutoff.isoformat()}",
+            # Only enough to group and label the activity -- never the
+            # nutrition snapshot or which food was logged.
+            "select": "user_id,meal_type,logged_at",
+            "order": "logged_at.desc",
+        },
+    )
+
+    groups: dict[tuple[str, str, object], dict] = {}
+    for log in logs:
+        profile = visible[log["user_id"]]
+        day = utc_timestamp_to_local_date(log["logged_at"], profile.get("timezone") or "UTC")
+        key = (log["user_id"], log["meal_type"], day)
+        group = groups.get(key)
+        if group is None:
+            # `logs` is already newest-first, so the first log seen for a
+            # given group is necessarily its most recent one.
+            groups[key] = {"count": 1, "latest": log["logged_at"]}
+        else:
+            group["count"] += 1
+
+    items = [
+        FriendActivityItem(
+            user_id=user_id,
+            username=visible[user_id]["username"],
+            meal_type=meal_type,
+            logged_at=group["latest"],
+            item_count=group["count"],
+        )
+        for (user_id, meal_type, _day), group in groups.items()
+    ]
+    items.sort(key=lambda i: i.logged_at, reverse=True)
+    return items[:MAX_ACTIVITY_ITEMS]

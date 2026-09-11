@@ -46,6 +46,22 @@ def test_weight_progress_no_data():
     assert weight_progress([(date(2026, 9, 1), 76.0)]) == (False, None)
 
 
+def test_weight_progress_ignores_trivial_fluctuation():
+    """A 0.1kg drop is ordinary scale noise, not meaningful progress --
+    must not be presented as a win."""
+    weights = [(date(2026, 9, 1), 76.0), (date(2026, 9, 8), 75.9)]
+    lower, delta = weight_progress(weights)
+    assert lower is False
+    assert delta == -0.1
+
+
+def test_weight_progress_detects_gain_without_claiming_loss():
+    weights = [(date(2026, 9, 1), 75.0), (date(2026, 9, 8), 75.8)]
+    lower, delta = weight_progress(weights)
+    assert lower is False
+    assert delta == 0.8
+
+
 def test_macro_goals_hit_within_tolerance():
     result = macro_goals_hit(
         consumed_calories=2050,

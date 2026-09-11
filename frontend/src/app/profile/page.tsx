@@ -1,29 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   ActivityLevel,
   DietaryMode,
-  GlassSize,
   Goal,
   MacroMode,
   MacroTargetsResponse,
-  NotificationSettings,
-  createGlassSize,
-  deleteGlassSize,
-  fetchGlassSizes,
-  fetchNotificationSettings,
-  updateNotificationSettings,
 } from "@/lib/api";
 import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
+import { GlassSizesManager } from "@/components/GlassSizesManager";
+import { NotificationsManager } from "@/components/NotificationsManager";
 import { NumericField } from "@/components/NumericField";
 import { RatePicker } from "@/components/RatePicker";
 import { TargetsEditor } from "@/components/TargetsEditor";
-import { supabase } from "@/lib/supabaseClient";
-import { Profile, useProfile } from "@/lib/useProfile";
-import { useSession } from "@/lib/useSession";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { supabase } from "@/lib/supabaseClient";
+import { Profile, useRefetchProfile } from "@/lib/ProfileProvider";
+import { useProfile } from "@/lib/useProfile";
+import { useSession } from "@/lib/useSession";
 
 const GOAL_LABELS: Record<Goal, string> = { cut: "Cut", maintain: "Maintain", bulk: "Bulk" };
 const DIET_LABELS: Record<DietaryMode, string> = {
@@ -32,10 +27,21 @@ const DIET_LABELS: Record<DietaryMode, string> = {
   non_vegetarian: "Non-vegetarian",
 };
 
+/**
+ * The single, real implementation of profile/goal/macro editing —
+ * embedded directly by the app sidebar's Profile, Weight Goal, and
+ * Calories & Macros sections (see AppSidebar) rather than reimplemented
+ * there, and still fully reachable at /profile on its own. Glass sizes,
+ * appearance, and notifications are self-contained (GlassSizesManager /
+ * ThemeToggle / NotificationsManager) and render here *and* in the
+ * sidebar from the exact same components — one implementation, mounted
+ * in two places, not two competing copies. Logout is sidebar-only (its
+ * Account section) since it isn't a "setting" to browse to a page for.
+ */
 export default function ProfilePage() {
-  const router = useRouter();
   const { session, loading: sessionLoading } = useSession();
   const profile = useProfile(session?.user.id);
+  const refetchProfile = useRefetchProfile();
 
   const [form, setForm] = useState<Partial<Profile>>({});
 
@@ -60,12 +66,6 @@ export default function ProfilePage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  const [glassSizes, setGlassSizes] = useState<GlassSize[]>([]);
-  const [newGlassLabel, setNewGlassLabel] = useState("");
-  const [newGlassVolume, setNewGlassVolume] = useState(250);
-
-  const [notif, setNotif] = useState<NotificationSettings | null>(null);
-
   useEffect(() => {
     if (!profile) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs local edit state when the loaded profile arrives
@@ -76,9 +76,6 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!session) return;
-    fetchGlassSizes().then(setGlassSizes).catch(() => {});
-    fetchNotificationSettings().then(setNotif).catch(() => {});
-
     supabase
       .from("weight_logs")
       .select("weight_kg")
@@ -168,35 +165,16 @@ export default function ProfilePage() {
         setLatestWeightKg(weightKg);
       }
 
+      // The update above went straight through Supabase, not through the
+      // shared ProfileProvider cache -- without this, Today/AppSidebar
+      // would keep showing pre-edit targets until the next full reload.
+      await refetchProfile();
       setSaveNotice("Saved — targets recalculated.");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Couldn't save.");
     } finally {
       setSaving(false);
     }
-  }
-
-  async function handleAddGlassSize() {
-    if (!newGlassLabel.trim()) return;
-    const created = await createGlassSize(newGlassLabel, newGlassVolume);
-    setGlassSizes((prev) => [...prev, created]);
-    setNewGlassLabel("");
-  }
-
-  async function handleDeleteGlassSize(id: string) {
-    await deleteGlassSize(id);
-    setGlassSizes((prev) => prev.filter((g) => g.id !== id));
-  }
-
-  async function handleSaveNotifications() {
-    if (!notif) return;
-    await updateNotificationSettings(notif);
-    setSaveNotice("Notification preferences saved.");
-  }
-
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/login");
   }
 
   return (
@@ -212,7 +190,9 @@ export default function ProfilePage() {
           onSubmit={handleSaveProfile}
           className="space-y-4 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
         >
-          <h2 className="text-sm font-semibold text-on-surface">Profile &amp; goals</h2>
+          <h2 id="profile-basics-section" className="text-sm font-semibold text-on-surface">
+            Profile &amp; goals
+          </h2>
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
               Username
@@ -289,7 +269,10 @@ export default function ProfilePage() {
                 ))}
               </select>
             </label>
-            <div className="col-span-2 flex gap-2">
+          </div>
+
+          <div id="weight-goal-section" className="space-y-3 scroll-mt-20">
+            <div className="flex gap-2">
               {(Object.entries(GOAL_LABELS) as [Goal, string][]).map(([v, l]) => (
                 <button
                   type="button"
@@ -308,16 +291,16 @@ export default function ProfilePage() {
                 </button>
               ))}
             </div>
-          </div>
 
-          {effectiveGoal !== "maintain" && (
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-on-surface">
-                {effectiveGoal === "cut" ? "Weight-loss" : "Weight-gain"} rate
-              </p>
-              <RatePicker goal={effectiveGoal} value={rateKgPerWeek} onChange={setRateKgPerWeek} />
-            </div>
-          )}
+            {effectiveGoal !== "maintain" && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-on-surface">
+                  {effectiveGoal === "cut" ? "Weight-loss" : "Weight-gain"} rate
+                </p>
+                <RatePicker goal={effectiveGoal} value={rateKgPerWeek} onChange={setRateKgPerWeek} />
+              </div>
+            )}
+          </div>
 
           <label className="flex items-center gap-2 text-sm text-on-surface">
             <input
@@ -328,7 +311,7 @@ export default function ProfilePage() {
             Show me on friends&apos; leaderboards
           </label>
 
-          <div>
+          <div id="calorie-macro-section" className="scroll-mt-20">
             <p className="mb-2 text-sm font-semibold text-on-surface">Calorie &amp; macro targets</p>
             {hasValidWeight ? (
               <TargetsEditor
@@ -373,48 +356,7 @@ export default function ProfilePage() {
 
         <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
           <h2 className="mb-2 text-sm font-semibold text-on-surface">Glass sizes</h2>
-          <ul className="mb-3 space-y-1">
-            {glassSizes.map((g) => (
-              <li key={g.id} className="flex items-center justify-between text-sm">
-                <span className="text-on-surface">
-                  {g.label} ({g.volume_ml}ml)
-                </span>
-                <button
-                  onClick={() => handleDeleteGlassSize(g.id)}
-                  className="text-xs text-fat"
-                  aria-label={`Remove ${g.label}`}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div className="flex items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-              Label
-              <input
-                value={newGlassLabel}
-                onChange={(e) => setNewGlassLabel(e.target.value)}
-                className="input w-28"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-              ml
-              <NumericField
-                min={1}
-                max={5000}
-                value={newGlassVolume}
-                onCommit={setNewGlassVolume}
-                className="input w-20"
-              />
-            </label>
-            <button
-              onClick={handleAddGlassSize}
-              className="rounded-[var(--radius-control)] bg-primary px-3 py-2 text-xs font-semibold text-on-primary"
-            >
-              Add
-            </button>
-          </div>
+          <GlassSizesManager />
         </section>
 
         <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
@@ -422,68 +364,10 @@ export default function ProfilePage() {
           <ThemeToggle />
         </section>
 
-        {notif && (
-          <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-            <h2 className="mb-2 text-sm font-semibold text-on-surface">Notifications</h2>
-            <label className="flex items-center justify-between py-1 text-sm text-on-surface">
-              Logging reminders
-              <input
-                type="checkbox"
-                checked={notif.logging_reminders_enabled}
-                onChange={(e) => setNotif({ ...notif, logging_reminders_enabled: e.target.checked })}
-              />
-            </label>
-            <label className="flex items-center justify-between py-1 text-sm text-on-surface">
-              Streak-at-risk warnings
-              <input
-                type="checkbox"
-                checked={notif.streak_warnings_enabled}
-                onChange={(e) => setNotif({ ...notif, streak_warnings_enabled: e.target.checked })}
-              />
-            </label>
-            <label className="flex items-center justify-between py-1 text-sm text-on-surface">
-              Macro-close-to-goal nudges
-              <input
-                type="checkbox"
-                checked={notif.macro_nudges_enabled}
-                onChange={(e) => setNotif({ ...notif, macro_nudges_enabled: e.target.checked })}
-              />
-            </label>
-            <div className="mt-2 flex items-center gap-2">
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                Quiet hours start
-                <input
-                  type="time"
-                  value={notif.quiet_hours_start ?? ""}
-                  onChange={(e) => setNotif({ ...notif, quiet_hours_start: e.target.value || null })}
-                  className="input"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-                End
-                <input
-                  type="time"
-                  value={notif.quiet_hours_end ?? ""}
-                  onChange={(e) => setNotif({ ...notif, quiet_hours_end: e.target.value || null })}
-                  className="input"
-                />
-              </label>
-            </div>
-            <button
-              onClick={handleSaveNotifications}
-              className="mt-3 w-full rounded-[var(--radius-control)] bg-primary py-2 text-sm font-semibold text-on-primary"
-            >
-              Save notification preferences
-            </button>
-          </section>
-        )}
-
-        <button
-          onClick={handleLogout}
-          className="w-full rounded-[var(--radius-control)] border border-outline-variant py-3 text-sm font-semibold text-fat"
-        >
-          Log out
-        </button>
+        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+          <h2 className="mb-2 text-sm font-semibold text-on-surface">Notifications</h2>
+          <NotificationsManager />
+        </section>
       </div>
     </main>
   );

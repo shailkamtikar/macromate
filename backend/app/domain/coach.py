@@ -6,10 +6,9 @@ calculations, never from the model itself.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.domain.macros import (
-    ActivityLevel,
     BiologicalSex,
     Goal,
     MacroTargets,
@@ -18,18 +17,6 @@ from app.domain.macros import (
     calculate_bmi,
     calculate_remaining_macros,
 )
-
-COACH_SYSTEM_INSTRUCTION = """You are MacroMate Coach, a friendly, encouraging nutrition assistant inside the MacroMate app.
-
-Ground rules, always:
-- Use ONLY the numeric facts given to you below. Never invent or recompute calorie, macro, or BMI numbers yourself.
-- Never give medical advice, diagnose any condition, or recommend an extreme calorie deficit or surplus. If the user asks something medical, gently redirect them to a doctor or registered dietitian.
-- Be warm, brief, and encouraging. Never shame the user for missed goals.
-- If asked for a food/meal suggestion, keep it general (you don't have live access to the food database in this conversation) and suggest they use the app's food search or "Calculate with AI" feature for exact logging.
-
-Today's facts about this user (use these, don't recalculate):
-{context}
-"""
 
 
 @dataclass(frozen=True)
@@ -40,6 +27,15 @@ class CoachContext:
     target: MacroTargets
     remaining: RemainingMacros
     recent_weights_kg: list[float]
+    # All optional/bounded additions kept deliberately small (a handful of
+    # short lines, not full history) so the injected context stays cheap —
+    # see context_to_prompt_text, which omits any of these that weren't
+    # supplied rather than printing an empty/placeholder line.
+    hydration_ml: float | None = None
+    hydration_goal_ml: float | None = None
+    logged_food_names: list[str] = field(default_factory=list)
+    weekly_summary: str | None = None
+    activity_steps_today: int | None = None
 
 
 def build_context(
@@ -54,6 +50,11 @@ def build_context(
     consumed_carbs_g: float,
     consumed_fat_g: float,
     recent_weights_kg: list[float],
+    hydration_ml: float | None = None,
+    hydration_goal_ml: float | None = None,
+    logged_food_names: list[str] | None = None,
+    weekly_summary: str | None = None,
+    activity_steps_today: int | None = None,
 ) -> CoachContext:
     bmi = calculate_bmi(weight_kg, height_cm)
     remaining = calculate_remaining_macros(
@@ -70,6 +71,11 @@ def build_context(
         target=target,
         remaining=remaining,
         recent_weights_kg=recent_weights_kg,
+        hydration_ml=hydration_ml,
+        hydration_goal_ml=hydration_goal_ml,
+        logged_food_names=logged_food_names or [],
+        weekly_summary=weekly_summary,
+        activity_steps_today=activity_steps_today,
     )
 
 
@@ -79,15 +85,26 @@ def context_to_prompt_text(ctx: CoachContext) -> str:
         if ctx.recent_weights_kg
         else "no recent weight logs"
     )
-    return (
-        f"- Goal: {ctx.goal}\n"
-        f"- BMI: {ctx.bmi} ({ctx.bmi_category})\n"
+    lines = [
+        f"- Goal: {ctx.goal}\n",
+        f"- BMI: {ctx.bmi} ({ctx.bmi_category})\n",
         f"- Daily target: {ctx.target.calories} kcal, "
-        f"{ctx.target.protein_g}g protein, {ctx.target.carbs_g}g carbs, {ctx.target.fat_g}g fat\n"
+        f"{ctx.target.protein_g}g protein, {ctx.target.carbs_g}g carbs, {ctx.target.fat_g}g fat\n",
         f"- Remaining today: {ctx.remaining.calories} kcal, "
-        f"{ctx.remaining.protein_g}g protein, {ctx.remaining.carbs_g}g carbs, {ctx.remaining.fat_g}g fat\n"
-        f"- Recent weight trend: {trend}\n"
-    )
+        f"{ctx.remaining.protein_g}g protein, {ctx.remaining.carbs_g}g carbs, {ctx.remaining.fat_g}g fat\n",
+        f"- Recent weight trend: {trend}\n",
+    ]
+    if ctx.hydration_goal_ml:
+        lines.append(
+            f"- Hydration today: {round(ctx.hydration_ml or 0)}/{round(ctx.hydration_goal_ml)} ml\n"
+        )
+    if ctx.logged_food_names:
+        lines.append(f"- Logged today: {', '.join(ctx.logged_food_names)}\n")
+    if ctx.weekly_summary:
+        lines.append(f"- {ctx.weekly_summary}\n")
+    if ctx.activity_steps_today is not None:
+        lines.append(f"- Activity today: {ctx.activity_steps_today} steps\n")
+    return "".join(lines)
 
 
 _PROTEIN_LEFT_RE = re.compile(r"protein.*(left|remain)", re.IGNORECASE)

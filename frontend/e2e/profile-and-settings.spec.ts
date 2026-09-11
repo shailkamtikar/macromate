@@ -60,7 +60,7 @@ async function deleteUser(userId: string) {
   });
 }
 
-test("profile edit recalculates targets and persists; dark mode toggle persists", async ({
+test("sidebar's Weight goal editor recalculates targets and persists; Appearance toggle persists", async ({
   page,
 }) => {
   const user = await createOnboardedUser();
@@ -71,41 +71,49 @@ test("profile edit recalculates targets and persists; dark mode toggle persists"
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
 
-    // Profile/settings is now a persistent app-level trigger (available on
-    // every major screen) that opens a retractable panel over the current
-    // page, rather than a per-page link that navigates away.
-    await page.getByRole("button", { name: "Profile & settings" }).click();
-    await expect(page.getByRole("dialog", { name: "Profile & settings" })).toBeVisible();
+    // The persistent app sidebar (desktop rail at this default viewport)
+    // is the central place for profile/settings — expand "Weight goal"
+    // and open the real editor from there.
+    const sidebar = page.getByTestId("app-sidebar");
+    await sidebar.getByRole("button", { name: "Weight goal" }).click();
+    await sidebar.getByRole("button", { name: "Edit weight & goal" }).click();
+
+    const editor = page.getByRole("dialog", { name: "Profile & settings" });
+    await expect(editor).toBeVisible();
 
     // Change goal to "Cut", pick a weight-loss rate, and weight, then save
     // — should recalculate a lower calorie target through the real backend.
-    await page.getByRole("button", { name: "Cut" }).click();
-    await page.getByRole("button", { name: "Lose 0.5 kg/week", exact: false }).click();
-    await page.getByLabel("Current weight (kg)").fill("80");
+    await editor.getByRole("button", { name: "Cut" }).click();
+    await editor.getByRole("button", { name: "Lose 0.5 kg/week", exact: false }).click();
+    await editor.getByLabel("Current weight (kg)").fill("80");
 
-    const saveButton = page.getByRole("button", { name: "Save & recalculate targets" });
+    const saveButton = editor.getByRole("button", { name: "Save & recalculate targets" });
     // Targets recalculate asynchronously (debounced call to the real
     // deterministic backend) — wait for that to finish before saving,
     // rather than racing it.
     await expect(saveButton).toBeEnabled({ timeout: 10_000 });
     await saveButton.click();
-    await expect(page.getByText("Saved — targets recalculated.")).toBeVisible({
+    await expect(editor.getByText("Saved — targets recalculated.")).toBeVisible({
       timeout: 10_000,
     });
 
-    // Dark mode toggle: click "dark", verify the attribute is applied and
-    // reload keeps it (real localStorage persistence, not just in-memory).
-    await page.getByRole("button", { name: "dark" }).click();
+    await page.getByRole("button", { name: "Close profile & settings" }).click();
+    await expect(editor).not.toBeVisible();
+
+    // Appearance is edited inline in the sidebar, no dialog needed.
+    await sidebar.getByRole("button", { name: "Appearance" }).click();
+    await sidebar.getByRole("button", { name: "dark" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-    // The panel is a fresh, closed overlay after reload — reopen it.
-    await page.getByRole("button", { name: "Profile & settings" }).click();
-    await expect(page.getByRole("dialog", { name: "Profile & settings" })).toBeVisible();
+    // The desktop rail is persistent — it's still there (and still knows
+    // the theme) without needing to be reopened after reload.
+    await expect(page.getByTestId("app-sidebar")).toBeVisible();
 
-    // Logout actually clears the session and redirects.
-    await page.getByRole("button", { name: "Log out" }).click();
+    // Logout, from the sidebar's own Account section, actually clears the
+    // session and redirects.
+    await page.getByTestId("app-sidebar").getByRole("button", { name: "Log out" }).click();
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
   } finally {
     await deleteUser(user.userId);

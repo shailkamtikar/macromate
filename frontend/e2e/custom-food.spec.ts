@@ -147,7 +147,7 @@ test("user creates a custom food, a second user discovers and logs it globally, 
     await expect(searchResults).toContainText(foodName, { timeout: 10_000 });
     await searchResults.getByRole("button", { name: `Add ${foodName}` }).click();
 
-    const mealRow = pageB.locator("li", { hasText: foodName });
+    const mealRow = pageB.getByTestId("diary").locator("li", { hasText: foodName });
     await expect(mealRow).toBeVisible({ timeout: 10_000 });
     await expect(mealRow).toContainText("180 kcal");
     await contextB.close();

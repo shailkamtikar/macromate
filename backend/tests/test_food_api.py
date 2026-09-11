@@ -363,6 +363,210 @@ def test_deleting_food_log_removes_it_and_updates_todays_totals(client, auth_hea
         _cleanup_food(food_id)
 
 
+def test_moving_a_food_log_to_another_meal_persists_and_keeps_nutrition(
+    client, auth_headers
+):
+    """Phase 1: reassigning an entry between meals must persist to Supabase
+    and must not disturb the entry's nutrition — it's the same food in the
+    same amount, just filed under a different meal."""
+    db = SupabaseAdmin()
+    unique_name = f"__test_move_food_{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/foods",
+        headers=auth_headers,
+        json={
+            "name": unique_name,
+            "serving_description": "1 bowl (150 g)",
+            "calories": 250,
+            "protein_g": 12,
+            "carbs_g": 30,
+            "fat_g": 8,
+            "force": True,
+        },
+    ).json()["created"]
+    food_id = created["id"]
+
+    try:
+        logged = client.post(
+            "/api/food-logs",
+            headers=auth_headers,
+            json={"food_item_id": food_id, "meal_type": "breakfast", "quantity": 2},
+        ).json()
+        assert logged["meal_type"] == "breakfast"
+        assert logged["calories"] == 500
+
+        moved = client.patch(
+            f"/api/food-logs/{logged['id']}",
+            headers=auth_headers,
+            json={"meal_type": "dinner"},
+        )
+        assert moved.status_code == 200, moved.text
+        body = moved.json()
+        assert body["meal_type"] == "dinner"
+        assert body["quantity"] == 2
+        assert body["calories"] == 500  # unchanged by the move
+        assert body["protein_g"] == 24
+
+        # And it really persisted, not just echoed back.
+        from datetime import datetime, timezone
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        rows = client.get(
+            "/api/food-logs", headers=auth_headers, params={"date": today}
+        ).json()
+        [row] = [r for r in rows if r["id"] == logged["id"]]
+        assert row["meal_type"] == "dinner"
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+        _cleanup_food(food_id)
+
+
+def test_quantity_and_meal_can_change_in_one_request(client, auth_headers):
+    db = SupabaseAdmin()
+    unique_name = f"__test_move_qty_food_{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/foods",
+        headers=auth_headers,
+        json={
+            "name": unique_name,
+            "serving_description": "100g",
+            "calories": 100,
+            "protein_g": 10,
+            "carbs_g": 5,
+            "fat_g": 2,
+            "force": True,
+        },
+    ).json()["created"]
+    food_id = created["id"]
+
+    try:
+        logged = client.post(
+            "/api/food-logs",
+            headers=auth_headers,
+            json={"food_item_id": food_id, "meal_type": "snack", "quantity": 1},
+        ).json()
+
+        updated = client.patch(
+            f"/api/food-logs/{logged['id']}",
+            headers=auth_headers,
+            json={"quantity": 2.5, "meal_type": "lunch"},
+        )
+        assert updated.status_code == 200, updated.text
+        body = updated.json()
+        assert body["meal_type"] == "lunch"
+        assert body["quantity"] == 2.5
+        assert body["calories"] == 250
+        assert body["protein_g"] == 25
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+        _cleanup_food(food_id)
+
+
+def test_food_log_exposes_serving_metadata_for_unit_display(client, auth_headers):
+    """The diary shows "300 g" rather than "2 servings" when the food's
+    serving description states a weight — that weight has to reach the
+    client."""
+    db = SupabaseAdmin()
+    unique_name = f"__test_serving_meta_{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/foods",
+        headers=auth_headers,
+        json={
+            "name": unique_name,
+            "serving_description": "1 bowl (150 g)",
+            "calories": 250,
+            "protein_g": 12,
+            "carbs_g": 30,
+            "fat_g": 8,
+            "force": True,
+        },
+    ).json()["created"]
+    food_id = created["id"]
+    assert created["serving_weight"] == 150
+    assert created["serving_weight_unit"] == "g"
+
+    try:
+        logged = client.post(
+            "/api/food-logs",
+            headers=auth_headers,
+            json={"food_item_id": food_id, "meal_type": "lunch", "quantity": 2},
+        ).json()
+        assert logged["serving_description"] == "1 bowl (150 g)"
+        assert logged["serving_weight"] == 150
+        assert logged["serving_weight_unit"] == "g"
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+        _cleanup_food(food_id)
+
+
+def test_patch_with_no_changes_is_rejected(client, auth_headers):
+    resp = client.patch(
+        "/api/food-logs/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers,
+        json={},
+    )
+    assert resp.status_code == 422
+
+
+def test_recent_and_frequent_foods_reflect_this_users_own_logs(
+    client, auth_headers, other_auth_headers
+):
+    """Recent/frequent power fast repeat logging. Both must come from the
+    caller's own diary — never another user's."""
+    db = SupabaseAdmin()
+    names = [f"__test_recent_{i}_{uuid.uuid4().hex[:6]}" for i in range(2)]
+    food_ids = []
+    for name in names:
+        created = client.post(
+            "/api/foods",
+            headers=auth_headers,
+            json={
+                "name": name,
+                "serving_description": "100g",
+                "calories": 100,
+                "protein_g": 5,
+                "carbs_g": 10,
+                "fat_g": 3,
+                "force": True,
+            },
+        ).json()["created"]
+        food_ids.append(created["id"])
+
+    try:
+        # Log the first food three times, the second once — so the first is
+        # the more *frequent* one and the second the more *recent* one.
+        for _ in range(3):
+            client.post(
+                "/api/food-logs",
+                headers=auth_headers,
+                json={"food_item_id": food_ids[0], "meal_type": "snack", "quantity": 1},
+            )
+        client.post(
+            "/api/food-logs",
+            headers=auth_headers,
+            json={"food_item_id": food_ids[1], "meal_type": "snack", "quantity": 1},
+        )
+
+        body = client.get("/api/foods/recent", headers=auth_headers).json()
+        recent_names = [f["name"] for f in body["recent"]]
+        frequent_names = [f["name"] for f in body["frequent"]]
+
+        assert recent_names[0] == names[1]  # most recently logged first
+        assert frequent_names[0] == names[0]  # most often logged first
+        assert body["frequent"][0]["log_count"] == 3
+        # Deduplicated: three logs of the same food are one recent entry.
+        assert recent_names.count(names[0]) == 1
+
+        # A different user's diary is empty — no cross-user leakage.
+        other = client.get("/api/foods/recent", headers=other_auth_headers).json()
+        assert all(f["name"] not in names for f in other["recent"])
+        assert all(f["name"] not in names for f in other["frequent"])
+    finally:
+        for food_id in food_ids:
+            db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+            _cleanup_food(food_id)
+
+
 def test_cannot_edit_or_delete_another_users_food_log(client, auth_headers, other_auth_headers):
     """A client-supplied log id must be scoped to the authenticated user —
     another user's log is invisible (404), never editable/deletable."""

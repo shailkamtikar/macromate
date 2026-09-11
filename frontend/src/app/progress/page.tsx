@@ -5,6 +5,7 @@ import { Achievements, WeeklyReport, fetchAchievements, fetchWeeklyReport } from
 import { useSession } from "@/lib/useSession";
 import { ActivityLogger } from "@/components/ActivityLogger";
 import { WeightHistoryChart } from "@/components/WeightHistoryChart";
+import { AchievementsCard } from "@/components/AchievementsCard";
 
 function ComparisonBar({
   label,
@@ -93,88 +94,107 @@ export default function ProgressPage() {
           <p className="text-sm text-on-surface-variant">Loading…</p>
         ) : (
           <>
-            <section className="grid grid-cols-2 gap-3">
-              <div className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  Adherence
-                </p>
-                <p className="font-display text-2xl font-bold text-on-surface">
-                  {report.current.adherence_pct}%
-                </p>
+            <WeightHistoryChart userId={session.user.id} />
+
+            <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {report.current.is_partial ? "This week so far" : "This week"}
+              </p>
+              <p className="font-display text-2xl font-bold text-on-surface">
+                {report.current.days_logged}
+                <span className="text-base font-medium text-on-surface-variant">
+                  {" "}
+                  / {report.current.days_in_period} days logged
+                </span>
+              </p>
+              {report.current.is_partial && (
                 <p className="text-xs text-on-surface-variant">
-                  {report.current.days_goal_hit}/7 days on target
+                  Day {report.current.days_in_period} of 7 — comparisons below use daily averages,
+                  not full-week totals.
                 </p>
-              </div>
-              <div className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  Weight trend
-                </p>
-                <p className="font-display text-2xl font-bold text-on-surface">
-                  {report.weight_delta_kg === null
-                    ? "—"
-                    : `${report.weight_delta_kg > 0 ? "+" : ""}${report.weight_delta_kg}kg`}
-                </p>
-                <p className="text-xs text-on-surface-variant">
-                  {report.weight_start_kg && report.weight_end_kg
-                    ? `${report.weight_start_kg}kg → ${report.weight_end_kg}kg`
-                    : "No weigh-ins this week"}
-                </p>
+              )}
+            </section>
+
+            <section className="space-y-2 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                Macro adherence — {report.current.is_partial ? "so far" : "this week"}
+              </p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-4">
+                <div className="flex items-baseline justify-between gap-1 sm:flex-col sm:items-start sm:gap-0">
+                  <span className="text-on-surface-variant">Calories</span>
+                  <span className="font-semibold text-on-surface">
+                    {report.current.days_goal_hit}/{report.current.days_in_period}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-1 sm:flex-col sm:items-start sm:gap-0">
+                  <span className="text-on-surface-variant">Protein</span>
+                  <span className="font-semibold text-on-surface">
+                    {report.current.protein_days_hit}/{report.current.days_in_period}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-1 sm:flex-col sm:items-start sm:gap-0">
+                  <span className="text-on-surface-variant">Carbs</span>
+                  <span className="font-semibold text-on-surface">
+                    {report.current.carbs_days_hit}/{report.current.days_in_period}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-1 sm:flex-col sm:items-start sm:gap-0">
+                  <span className="text-on-surface-variant">Fat</span>
+                  <span className="font-semibold text-on-surface">
+                    {report.current.fat_days_hit}/{report.current.days_in_period}
+                  </span>
+                </div>
               </div>
             </section>
 
-            <WeightHistoryChart userId={session.user.id} />
+            {achievements && <AchievementsCard achievements={achievements} />}
 
-            {achievements && (
-              <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                      Logging streak
-                    </p>
-                    <p className="font-display text-2xl font-bold text-on-surface">
-                      {achievements.current_streak_days}{" "}
-                      <span className="text-base font-medium text-on-surface-variant">days</span>
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
-                    {[3, 7, 14, 30].map((m) => (
-                      <span
-                        key={m}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${
-                          achievements.milestones_hit.includes(m)
-                            ? "bg-primary text-on-primary"
-                            : "bg-surface-container text-on-surface-variant"
-                        }`}
-                        title={`${m}-day streak`}
-                      >
-                        {m}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {(achievements.calorie_goal_hit_today || achievements.weight_lower_than_last) && (
-                  <div className="mt-2 space-y-1">
-                    {achievements.calorie_goal_hit_today && (
-                      <p className="flex items-center gap-1.5 text-xs text-primary">
-                        <span className="material-symbols-outlined text-sm">celebration</span>
-                        Calorie goal hit today!
-                      </p>
-                    )}
-                    {achievements.weight_lower_than_last && (
-                      <p className="flex items-center gap-1.5 text-xs text-primary">
-                        <span className="material-symbols-outlined text-sm">trending_down</span>
-                        Weight down {Math.abs(achievements.weight_delta_kg ?? 0)}kg since last entry.
-                      </p>
-                    )}
-                  </div>
-                )}
+            {report.previous.days_logged > 0 ? (
+              <section className="space-y-3 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  Daily averages — solid = {report.current.is_partial ? "this week so far" : "this week"}, faded = last week
+                </p>
+                <ComparisonBar
+                  label="Calories"
+                  current={report.current.avg_calories}
+                  previous={report.previous.avg_calories}
+                  colorVar="var(--color-primary)"
+                  unit=" kcal"
+                />
+                <ComparisonBar
+                  label="Protein"
+                  current={report.current.avg_protein_g}
+                  previous={report.previous.avg_protein_g}
+                  colorVar="var(--color-protein)"
+                  unit="g"
+                />
+                <ComparisonBar
+                  label="Carbs"
+                  current={report.current.avg_carbs_g}
+                  previous={report.previous.avg_carbs_g}
+                  colorVar="var(--color-carbs)"
+                  unit="g"
+                />
+                <ComparisonBar
+                  label="Fat"
+                  current={report.current.avg_fat_g}
+                  previous={report.previous.avg_fat_g}
+                  colorVar="var(--color-fat)"
+                  unit="g"
+                />
               </section>
+            ) : (
+              report.current.days_logged > 0 && (
+                <p className="text-xs text-on-surface-variant">
+                  No data logged last week, so there&apos;s nothing to compare this week against yet.
+                </p>
+              )
             )}
 
             {report.wins.length > 0 && (
               <section className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-4 shadow-sm">
                 <div className="mb-2 flex items-center gap-1.5 text-primary">
-                  <span className="material-symbols-outlined text-lg">celebration</span>
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true">celebration</span>
                   <span className="text-xs font-bold uppercase tracking-wider">Wins</span>
                 </div>
                 <ul className="space-y-1">
@@ -187,39 +207,21 @@ export default function ProgressPage() {
               </section>
             )}
 
-            <section className="space-y-3 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                Daily averages — solid = this week, faded = last week
-              </p>
-              <ComparisonBar
-                label="Calories"
-                current={report.current.avg_calories}
-                previous={report.previous.avg_calories}
-                colorVar="var(--color-primary)"
-                unit=" kcal"
-              />
-              <ComparisonBar
-                label="Protein"
-                current={report.current.avg_protein_g}
-                previous={report.previous.avg_protein_g}
-                colorVar="var(--color-protein)"
-                unit="g"
-              />
-              <ComparisonBar
-                label="Carbs"
-                current={report.current.avg_carbs_g}
-                previous={report.previous.avg_carbs_g}
-                colorVar="var(--color-carbs)"
-                unit="g"
-              />
-              <ComparisonBar
-                label="Fat"
-                current={report.current.avg_fat_g}
-                previous={report.previous.avg_fat_g}
-                colorVar="var(--color-fat)"
-                unit="g"
-              />
-            </section>
+            {report.improvement_areas.length > 0 && (
+              <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+                <div className="mb-2 flex items-center gap-1.5 text-on-surface-variant">
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true">trending_up</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Where to focus</span>
+                </div>
+                <ul className="space-y-1">
+                  {report.improvement_areas.map((a, i) => (
+                    <li key={i} className="text-sm text-on-surface">
+                      {a}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <ActivityLogger />
           </>

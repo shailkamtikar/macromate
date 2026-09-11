@@ -11,7 +11,7 @@ interface RatePickerProps {
 const CUT_OPTIONS: { rate: number; label: string; blurb: string }[] = [
   { rate: 0.5, label: "0.5 kg/week", blurb: "Gradual — easiest to sustain, smallest calorie deficit." },
   { rate: 0.75, label: "0.75 kg/week", blurb: "Moderate — a balance of speed and sustainability." },
-  { rate: 1.0, label: "1 kg/week", blurb: "Aggressive — the fastest safe rate; a larger daily deficit." },
+  { rate: 1.0, label: "1 kg/week", blurb: "Aggressive — the fastest rate we offer; a larger daily deficit." },
 ];
 
 const BULK_OPTIONS: { rate: number; label: string; blurb: string }[] = [
@@ -58,7 +58,7 @@ export function RatePicker({ goal, value, onChange }: RatePickerProps) {
                 }`}
               >
                 {selected && (
-                  <span className="material-symbols-outlined text-xs text-on-primary">check</span>
+                  <span className="material-symbols-outlined text-xs text-on-primary" aria-hidden="true">check</span>
                 )}
               </span>
             </div>

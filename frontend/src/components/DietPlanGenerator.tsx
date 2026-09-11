@@ -34,7 +34,7 @@ export function DietPlanGenerator() {
       <p className="mb-3 text-xs text-on-surface-variant">
         Built to fit your actual daily target — not a generic plan.
       </p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <select
           value={mode}
           onChange={(e) => setMode(e.target.value as DietaryMode)}

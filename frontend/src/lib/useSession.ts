@@ -1,27 +1,15 @@
 "use client";
 
-import { Session } from "@supabase/supabase-js";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useContext } from "react";
+import { SessionContext, SessionState } from "@/lib/SessionProvider";
 
-export function useSession() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-      },
-    );
-
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  return { session, loading };
+/** Reads the app-wide session resolved once by SessionProvider (see that
+ * file) -- same { session, loading } shape every existing caller already
+ * expects, so no call site needs to change. */
+export function useSession(): SessionState {
+  const ctx = useContext(SessionContext);
+  if (!ctx) {
+    throw new Error("useSession must be used within a SessionProvider");
+  }
+  return ctx;
 }

@@ -136,3 +136,108 @@ def test_user_b_cannot_delete_user_a_water_log(client, two_users):
     today = datetime.now(timezone.utc).date().isoformat()
     a_summary = client.get("/api/water-logs", headers=a["headers"], params={"date": today})
     assert any(l["id"] == log_id for l in a_summary.json()["logs"])
+
+
+def test_remove_water_undoes_one_container(client, two_users):
+    """The "-" control: subtract exactly one container's worth."""
+    a = two_users["a"]
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 250})
+
+    removed = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250}
+    )
+    assert removed.status_code == 200, removed.text
+    body = removed.json()
+    assert body["total_ml"] == 0
+    assert body["logs"] == []
+
+
+def test_remove_water_cannot_go_below_zero(client, two_users):
+    a = two_users["a"]
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 100})
+
+    # Ask to remove more (250ml) than is logged (100ml) — should clamp to
+    # zero, not go negative or error.
+    removed = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250}
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["total_ml"] == 0
+
+    # A second remove call on an already-empty day is a safe no-op.
+    again = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250}
+    )
+    assert again.status_code == 200
+    assert again.json()["total_ml"] == 0
+
+
+def test_remove_water_targets_the_most_recently_logged_entry(client, two_users):
+    a = two_users["a"]
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 500})
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 250})
+
+    removed = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250}
+    )
+    assert removed.status_code == 200, removed.text
+    body = removed.json()
+    # The most recent 250ml log is gone; the earlier 500ml log survives
+    # untouched — a correction removes the last thing logged, not an
+    # arbitrary or oldest entry.
+    assert body["total_ml"] == 500
+    assert len(body["logs"]) == 1
+    assert body["logs"][0]["volume_ml"] == 500
+
+
+def test_remove_water_partially_reduces_a_larger_log(client, two_users):
+    a = two_users["a"]
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 500})
+
+    removed = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250}
+    )
+    assert removed.status_code == 200, removed.text
+    body = removed.json()
+    # The 500ml log shrinks to 250ml remaining rather than being deleted —
+    # the day's history reflects what was actually drunk.
+    assert body["total_ml"] == 250
+    assert len(body["logs"]) == 1
+    assert body["logs"][0]["volume_ml"] == 250
+
+
+def test_remove_water_persists_and_is_scoped_per_user(client, two_users):
+    a, b = two_users["a"], two_users["b"]
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 250})
+    client.post("/api/water-logs", headers=b["headers"], json={"volume_ml": 250})
+
+    client.post("/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 250})
+
+    # A's removal must not affect B's independently-logged water.
+    today = datetime.now(timezone.utc).date().isoformat()
+    a_summary = client.get("/api/water-logs", headers=a["headers"], params={"date": today})
+    b_summary = client.get("/api/water-logs", headers=b["headers"], params={"date": today})
+    assert a_summary.json()["total_ml"] == 0
+    assert b_summary.json()["total_ml"] == 250
+
+    # Re-fetching (simulating a page reload) still reflects the removal.
+    a_summary_again = client.get(
+        "/api/water-logs", headers=a["headers"], params={"date": today}
+    )
+    assert a_summary_again.json()["total_ml"] == 0
+
+
+def test_remove_water_respects_a_custom_container_size(client, two_users):
+    """A custom glass/container size doesn't change the removal mechanics —
+    the caller (frontend) always sends the volume of the container being
+    subtracted, and the day's history isn't rewritten by later glass-size
+    configuration changes."""
+    a = two_users["a"]
+    client.post("/api/glass-sizes", headers=a["headers"], json={"label": "Big bottle", "volume_ml": 1000})
+    client.post("/api/water-logs", headers=a["headers"], json={"volume_ml": 1000})
+
+    removed = client.post(
+        "/api/water-logs/remove", headers=a["headers"], json={"volume_ml": 1000}
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["total_ml"] == 0

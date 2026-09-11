@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MacroMate</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --surface: #fbf8fc;
+        --on-surface: #1b1b1e;
+        --on-surface-variant: #3f493f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --surface: #0f1115;
+          --on-surface: #f4f4f5;
+          --on-surface-variant: #a1a1aa;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--surface);
+        color: var(--on-surface);
+        font-family: -apple-system, "Inter", ui-sans-serif, system-ui, sans-serif;
+        text-align: center;
+        padding: 24px;
+      }
+      h1 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 0.875rem;
+        color: var(--on-surface-variant);
+        margin: 0;
+      }
+      button {
+        margin-top: 20px;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: 1px solid var(--on-surface-variant);
+        background: transparent;
+        color: var(--on-surface);
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>MacroMate</h1>
+      <p>You're offline. Reconnect to keep logging and tracking your day.</p>
+      <button onclick="location.reload()">Try again</button>
+    </div>
+  </body>
+</html>

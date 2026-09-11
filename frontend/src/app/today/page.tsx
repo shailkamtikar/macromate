@@ -1,30 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CreateFoodResponse,
-  FoodItem,
+  Achievements,
   FoodLog,
   GlassSize,
   MealType,
   SuggestionsResponse,
   WaterSummary,
-  createFood,
   createGlassSize,
   deleteFoodLog,
+  fetchAchievements,
   fetchFoodLogs,
   fetchGlassSizes,
   fetchSuggestions,
   fetchWaterLogs,
   logFood,
   logWater,
-  searchFoods,
+  removeWater,
   updateFoodLog,
 } from "@/lib/api";
 import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
+import { MEAL_TYPES, inferMealType } from "@/lib/servings";
+import { BootstrapLoader } from "@/components/BootstrapLoader";
+import { DiaryMeal } from "@/components/DiaryMeal";
+import { FoodPicker } from "@/components/FoodPicker";
 import { NumericField } from "@/components/NumericField";
 import { WaterGlasses } from "@/components/WaterGlasses";
+import { StreakChip } from "@/components/AchievementsCard";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
@@ -39,22 +43,6 @@ const MACRO_ROWS: {
   { key: "fat_g", label: "Fat", colorVar: "var(--color-fat)" },
 ];
 
-const MEAL_LABELS: Record<MealType, string> = {
-  breakfast: "Breakfast",
-  lunch: "Lunch",
-  dinner: "Dinner",
-  snack: "Snack",
-};
-
-function inferMealType(): MealType {
-  const hour = new Date().getHours();
-  if (hour < 11) return "breakfast";
-  if (hour < 15) return "lunch";
-  if (hour < 18) return "snack";
-  return "dinner";
-}
-
-
 export default function TodayPage() {
   const router = useRouter();
   const { session, loading: sessionLoading } = useSession();
@@ -65,29 +53,22 @@ export default function TodayPage() {
   const [glassSizes, setGlassSizes] = useState<GlassSize[] | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionsResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<FoodItem[]>([]);
-  const [searching, setSearching] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newFood, setNewFood] = useState({
-    name: "",
-    serving_description: "",
-    calories: "",
-    protein_g: "",
-    carbs_g: "",
-    fat_g: "",
-  });
-  const [duplicates, setDuplicates] = useState<FoodItem[]>([]);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createdNotice, setCreatedNotice] = useState<string | null>(null);
-
-  const [editingLogId, setEditingLogId] = useState<string | null>(null);
-  const [editQuantity, setEditQuantity] = useState(1);
   const [logActionBusy, setLogActionBusy] = useState<string | null>(null);
+  const [waterBusy, setWaterBusy] = useState(false);
+
+  // Starts at a fixed value so the server-rendered markup is deterministic,
+  // then snaps to the meal that matches the current time of day once we're
+  // on the client (the server's clock/timezone isn't the user's).
+  const [pickerMeal, setPickerMeal] = useState<MealType>("breakfast");
+  const [diaryVersion, setDiaryVersion] = useState(0);
+  const [achievements, setAchievements] = useState<Achievements | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only time-of-day default, deliberately not computed during SSR
+    setPickerMeal(inferMealType());
+  }, []);
 
   useEffect(() => {
     if (!sessionLoading && !session) router.push("/login");
@@ -122,6 +103,7 @@ export default function TodayPage() {
       setWater(waterSummary);
       setGlassSizes(glasses);
       setSuggestions(suggestionsRes);
+      setDiaryVersion((v) => v + 1);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load today's data.");
     }
@@ -131,6 +113,15 @@ export default function TodayPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount, standard pattern
     if (session && profile) reloadDay();
   }, [session, profile]);
+
+  useEffect(() => {
+    // Lightweight, best-effort: the streak chip is a nice-to-have, so a
+    // failure here should never surface as a page error.
+    if (!session) return;
+    fetchAchievements()
+      .then(setAchievements)
+      .catch(() => {});
+  }, [session, diaryVersion]);
 
   const consumed = useMemo(() => {
     const totals = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
@@ -143,8 +134,25 @@ export default function TodayPage() {
     return totals;
   }, [foodLogs]);
 
+  const mealsByType = useMemo(() => {
+    const grouped: Record<MealType, FoodLog[]> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snack: [],
+    };
+    for (const log of foodLogs ?? []) grouped[log.meal_type].push(log);
+    return grouped;
+  }, [foodLogs]);
+
+  // Session resolution is already handled once, app-wide, by AppShell's
+  // BootstrapLoader gate (see SessionProvider); profile is likewise
+  // resolved once per session by ProfileProvider, not refetched on every
+  // navigation -- so this branch is now a genuine, once-per-session
+  // bootstrap moment rather than something that would otherwise flash on
+  // every visit to Today, and the same branded loader is appropriate here.
   if (sessionLoading || profile === undefined || !session) {
-    return <p className="p-10 text-sm text-on-surface-variant">Loading…</p>;
+    return <BootstrapLoader />;
   }
   if (!profile) {
     return <p className="p-10 text-sm text-on-surface-variant">Redirecting to onboarding…</p>;
@@ -158,101 +166,40 @@ export default function TodayPage() {
   const waterGoal = profile.water_goal_ml ?? 2500;
   const waterTotal = water?.total_ml ?? 0;
 
-  async function handleSearch(q: string) {
-    setQuery(q);
-    setActionError(null);
-    if (q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      setResults(await searchFoods(q));
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Search failed.");
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function handleQuickLog(food: { id: string }) {
-    setActionError(null);
-    try {
-      await logFood(food.id, inferMealType(), 1);
-      setQuery("");
-      setResults([]);
-      await reloadDay();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't log that food.");
-    }
-  }
-
-  async function submitCreateFood(force: boolean) {
-    setCreateError(null);
-    const calories = Number(newFood.calories);
-    const protein_g = Number(newFood.protein_g);
-    const carbs_g = Number(newFood.carbs_g);
-    const fat_g = Number(newFood.fat_g);
-    if (!newFood.name.trim() || !newFood.serving_description.trim()) {
-      setCreateError("Name and serving description are required.");
-      return;
-    }
-    if ([calories, protein_g, carbs_g, fat_g].some((n) => Number.isNaN(n) || n < 0)) {
-      setCreateError("Calories and macros must be numbers ≥ 0.");
-      return;
-    }
-    setCreating(true);
-    try {
-      const res: CreateFoodResponse = await createFood({
-        name: newFood.name.trim(),
-        serving_description: newFood.serving_description.trim(),
-        calories,
-        protein_g,
-        carbs_g,
-        fat_g,
-        force,
-      });
-      if (res.created) {
-        setDuplicates([]);
-        setShowCreateForm(false);
-        setCreatedNotice(`"${res.created.name}" created — search for it above to log it.`);
-        setNewFood({
-          name: "",
-          serving_description: "",
-          calories: "",
-          protein_g: "",
-          carbs_g: "",
-          fat_g: "",
-        });
-      } else {
-        // Likely-duplicate matches found — surface them so the user can
-        // either log an existing shared food instead, or force-create.
-        setDuplicates(res.possible_duplicates);
-      }
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Couldn't create that food.");
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleQuickWater(volumeMl: number) {
     setActionError(null);
+    setWaterBusy(true);
     try {
       await logWater(volumeMl);
       await reloadDay();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't log water.");
+    } finally {
+      setWaterBusy(false);
     }
   }
 
-  async function handleSaveLogQuantity(logId: string, quantity: number) {
-    if (quantity <= 0) return;
+  async function handleRemoveWater(volumeMl: number) {
+    setActionError(null);
+    setWaterBusy(true);
+    try {
+      await removeWater(volumeMl);
+      await reloadDay();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't undo that.");
+    } finally {
+      setWaterBusy(false);
+    }
+  }
+
+  async function handleSaveEntry(
+    logId: string,
+    changes: { quantity?: number; meal_type?: MealType },
+  ) {
     setActionError(null);
     setLogActionBusy(logId);
     try {
-      await updateFoodLog(logId, quantity);
-      setEditingLogId(null);
+      await updateFoodLog(logId, changes);
       await reloadDay();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't update that entry.");
@@ -261,13 +208,12 @@ export default function TodayPage() {
     }
   }
 
-  async function handleDeleteLog(log: FoodLog) {
-    if (!window.confirm(`Remove ${log.food_name} from today's log?`)) return;
+  async function handleDeleteEntry(log: FoodLog) {
+    if (!window.confirm(`Remove ${log.food_name} from today's diary?`)) return;
     setActionError(null);
     setLogActionBusy(log.id);
     try {
       await deleteFoodLog(log.id);
-      if (editingLogId === log.id) setEditingLogId(null);
       await reloadDay();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't remove that entry.");
@@ -276,28 +222,38 @@ export default function TodayPage() {
     }
   }
 
-  const mealsByType: Record<MealType, FoodLog[]> = {
-    breakfast: [],
-    lunch: [],
-    dinner: [],
-    snack: [],
-  };
-  for (const log of foodLogs ?? []) mealsByType[log.meal_type].push(log);
+  async function handleSuggestionAdd(foodId: string) {
+    setActionError(null);
+    try {
+      await logFood(foodId, inferMealType(), 1);
+      await reloadDay();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't log that food.");
+    }
+  }
+
+  function focusPickerOn(meal: MealType) {
+    setPickerMeal(meal);
+    pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
-      <div className="w-full max-w-2xl space-y-4 lg:max-w-5xl">
-        <header className="pt-1">
-          <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
-            {new Date().toLocaleDateString(undefined, {
-              weekday: "long",
-              month: "short",
-              day: "numeric",
-            })}
-          </p>
-          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
-            Today&apos;s Balance
-          </h1>
+      <div className="w-full max-w-2xl space-y-4 lg:max-w-6xl">
+        <header className="flex items-start justify-between pt-1">
+          <div>
+            <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
+              {new Date().toLocaleDateString(undefined, {
+                weekday: "long",
+                month: "short",
+                day: "numeric",
+              })}
+            </p>
+            <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+              Today&apos;s Diary
+            </h1>
+          </div>
+          {achievements && <StreakChip achievements={achievements} />}
         </header>
 
         {loadError && (
@@ -308,417 +264,203 @@ export default function TodayPage() {
             </button>
           </p>
         )}
-
-        <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
-        {/* Calorie hero card */}
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                Energy budget
-              </p>
-              <div className="mt-0.5 flex items-baseline gap-1">
-                <span className="font-display text-3xl font-bold tracking-tight text-on-surface">
-                  {remainingCalories}
-                </span>
-                <span className="text-base font-medium text-on-surface-variant">
-                  kcal left
-                </span>
-              </div>
-            </div>
-            <div className="relative flex h-20 w-20 items-center justify-center">
-              <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90 transform">
-                <circle
-                  cx="38"
-                  cy="38"
-                  r="32"
-                  fill="transparent"
-                  stroke="var(--color-surface-container-high)"
-                  strokeWidth="7"
-                />
-                <circle
-                  cx="38"
-                  cy="38"
-                  r="32"
-                  fill="transparent"
-                  stroke="var(--color-primary)"
-                  strokeWidth="7"
-                  strokeLinecap="round"
-                  strokeDasharray={201.06}
-                  strokeDashoffset={201.06 * (1 - percentOfTarget / 100)}
-                  className="transition-all duration-700"
-                />
-              </svg>
-              <span className="absolute text-sm font-bold text-on-surface">
-                {percentOfTarget}%
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-2">
-            <div className="px-2 py-1">
-              <p className="text-xs text-on-surface-variant">Consumed</p>
-              <p className="font-semibold text-on-surface" data-testid="consumed-calories">
-                {Math.round(consumed.calories)}{" "}
-                <span className="text-xs font-normal text-on-surface-variant">kcal</span>
-              </p>
-            </div>
-            <div className="px-2 py-1">
-              <p className="text-xs text-on-surface-variant">Daily goal</p>
-              <p className="font-semibold text-on-surface">
-                {profile.target_calories}{" "}
-                <span className="text-xs font-normal text-on-surface-variant">kcal</span>
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            {MACRO_ROWS.map(({ key, label, colorVar }) => {
-              const target = profile[`target_${key}` as keyof typeof profile] as number;
-              const value = consumed[key];
-              const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
-              return (
-                <div key={key} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-semibold text-on-surface">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: colorVar }}
-                      />
-                      {label}
-                    </span>
-                    <span className="text-on-surface-variant">
-                      <strong className="text-on-surface">{Math.round(value)}g</strong> /{" "}
-                      {target}g
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${pct}%`, backgroundColor: colorVar }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Quick food search / log */}
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-          <h2 className="mb-2 text-sm font-semibold text-on-surface">Log food</h2>
-          <input
-            value={query}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search foods…"
-            className="input w-full"
-          />
-          {searching && <p className="mt-2 text-xs text-on-surface-variant">Searching…</p>}
-          {results.length > 0 && (
-            <ul data-testid="food-search-results" className="mt-2 space-y-1">
-              {results.map((food) => (
-                <li
-                  key={food.id}
-                  className="flex items-center justify-between rounded-[var(--radius-control)] bg-surface-container-low px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-on-surface">
-                      {food.name}
-                    </p>
-                    <p className="text-xs text-on-surface-variant">
-                      {food.serving_description} · {food.calories} kcal
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleQuickLog(food)}
-                    className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
-                    aria-label={`Add ${food.name}`}
-                  >
-                    +
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {actionError && <p className="mt-2 text-xs text-fat">{actionError}</p>}
-
-          {!showCreateForm && (
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreateForm(true);
-                setCreatedNotice(null);
-                setDuplicates([]);
-              }}
-              className="mt-3 text-xs font-semibold text-primary underline-offset-2 hover:underline"
-            >
-              Can&apos;t find it? Create a custom food
-            </button>
-          )}
-
-          {createdNotice && (
-            <p className="mt-2 text-xs text-primary">{createdNotice}</p>
-          )}
-
-          {showCreateForm && (
-            <div className="mt-3 space-y-2 rounded-[var(--radius-control)] border border-outline-variant bg-surface-container-low p-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-on-surface">New custom food</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    setCreateError(null);
-                    setDuplicates([]);
-                  }}
-                  aria-label="Cancel"
-                  className="text-on-surface-variant"
-                >
-                  <span className="material-symbols-outlined text-base">close</span>
-                </button>
-              </div>
-              <input
-                value={newFood.name}
-                onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
-                placeholder="Name"
-                aria-label="Custom food name"
-                className="input w-full"
-              />
-              <input
-                value={newFood.serving_description}
-                onChange={(e) =>
-                  setNewFood({ ...newFood, serving_description: e.target.value })
-                }
-                placeholder="Serving description (e.g. 1 bowl, 100g)"
-                aria-label="Serving description"
-                className="input w-full"
-              />
-              <div className="grid grid-cols-4 gap-2">
-                <input
-                  value={newFood.calories}
-                  onChange={(e) => setNewFood({ ...newFood, calories: e.target.value })}
-                  placeholder="kcal"
-                  aria-label="Calories"
-                  type="number"
-                  min={0}
-                  className="input"
-                />
-                <input
-                  value={newFood.protein_g}
-                  onChange={(e) => setNewFood({ ...newFood, protein_g: e.target.value })}
-                  placeholder="Protein g"
-                  aria-label="Protein grams"
-                  type="number"
-                  min={0}
-                  className="input"
-                />
-                <input
-                  value={newFood.carbs_g}
-                  onChange={(e) => setNewFood({ ...newFood, carbs_g: e.target.value })}
-                  placeholder="Carbs g"
-                  aria-label="Carbs grams"
-                  type="number"
-                  min={0}
-                  className="input"
-                />
-                <input
-                  value={newFood.fat_g}
-                  onChange={(e) => setNewFood({ ...newFood, fat_g: e.target.value })}
-                  placeholder="Fat g"
-                  aria-label="Fat grams"
-                  type="number"
-                  min={0}
-                  className="input"
-                />
-              </div>
-
-              {duplicates.length > 0 && (
-                <div className="rounded-[var(--radius-control)] bg-surface-container p-2">
-                  <p className="mb-1 text-xs font-semibold text-on-surface">
-                    Similar foods already exist — log one of these instead, or create anyway:
-                  </p>
-                  <ul className="space-y-1">
-                    {duplicates.map((d) => (
-                      <li
-                        key={d.id}
-                        className="flex items-center justify-between rounded-[var(--radius-control)] bg-surface-container-lowest px-2 py-1.5"
-                      >
-                        <span className="truncate text-xs text-on-surface">
-                          {d.name} · {d.calories} kcal
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickLog(d)}
-                          className="ml-2 flex-shrink-0 rounded-full bg-primary-container px-2 py-0.5 text-xs font-semibold text-on-primary"
-                        >
-                          Log this
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    type="button"
-                    onClick={() => submitCreateFood(true)}
-                    disabled={creating}
-                    className="mt-2 text-xs font-semibold text-fat underline disabled:opacity-60"
-                  >
-                    Create anyway
-                  </button>
-                </div>
-              )}
-
-              {createError && <p className="text-xs text-fat">{createError}</p>}
-
-              {duplicates.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => submitCreateFood(false)}
-                  disabled={creating}
-                  className="w-full rounded-[var(--radius-control)] bg-primary py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
-                >
-                  {creating ? "Creating…" : "Create food"}
-                </button>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* Smart suggestions — deterministic constraint search, PRD §3.5 */}
-        {suggestions && suggestions.suggestions.length > 0 && (
-          <section className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-5 shadow-sm">
-            <div className="mb-2 flex items-center gap-1.5 text-primary">
-              <span className="material-symbols-outlined text-lg">psychology</span>
-              <span className="text-xs font-bold uppercase tracking-wider">
-                Suggestions for what&apos;s left
-              </span>
-            </div>
-            <p className="mb-3 text-sm text-on-surface-variant">{suggestions.message}</p>
-            <div className="space-y-2">
-              {suggestions.suggestions.map((food) => (
-                <div
-                  key={food.id}
-                  className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-on-surface">{food.name}</p>
-                    <p className="text-xs text-on-surface-variant">
-                      {food.calories} kcal · P {food.protein_g}g
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleQuickLog(food)}
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
-                    aria-label={`Add ${food.name}`}
-                  >
-                    +
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
+        {actionError && (
+          <p className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat">
+            {actionError}
+          </p>
         )}
 
-        {/* Hydration */}
-        <WaterCard
-          totalMl={waterTotal}
-          goalMl={waterGoal}
-          glassSizes={glassSizes ?? []}
-          onQuickLog={handleQuickWater}
-          onGlassAdded={reloadDay}
-        />
-
-        </div>
-
-        {/* Meal timeline */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-on-surface">Today&apos;s meals</h2>
-          {foodLogs === null ? (
-            <p className="text-sm text-on-surface-variant">Loading…</p>
-          ) : foodLogs.length === 0 ? (
-            <p className="rounded-[var(--radius-card)] border border-dashed border-outline-variant p-4 text-sm text-on-surface-variant">
-              Nothing logged yet today — search above to add your first meal.
-            </p>
-          ) : (
-            (Object.keys(MEAL_LABELS) as MealType[]).map((mealType) =>
-              mealsByType[mealType].length === 0 ? null : (
-                <div
-                  key={mealType}
-                  className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm"
-                >
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {MEAL_LABELS[mealType]}
-                  </h3>
-                  <ul className="space-y-2">
-                    {mealsByType[mealType].map((log) =>
-                      editingLogId === log.id ? (
-                        <li key={log.id} className="flex items-center gap-2 text-sm">
-                          <span className="min-w-0 flex-1 truncate text-on-surface">
-                            {log.food_name}
-                          </span>
-                          <NumericField
-                            aria-label={`Quantity for ${log.food_name}`}
-                            value={editQuantity}
-                            min={0.1}
-                            max={100}
-                            onLiveChange={setEditQuantity}
-                            onCommit={setEditQuantity}
-                            className="input w-16 text-right"
-                          />
-                          <button
-                            type="button"
-                            disabled={logActionBusy === log.id}
-                            onClick={() => handleSaveLogQuantity(log.id, editQuantity)}
-                            aria-label={`Save ${log.food_name}`}
-                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary disabled:opacity-60"
-                          >
-                            <span className="material-symbols-outlined text-sm">check</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingLogId(null)}
-                            aria-label="Cancel edit"
-                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-surface-container text-on-surface-variant"
-                          >
-                            <span className="material-symbols-outlined text-sm">close</span>
-                          </button>
-                        </li>
-                      ) : (
-                        <li key={log.id} className="flex items-center gap-2 text-sm">
-                          <span className="min-w-0 flex-1 truncate text-on-surface">
-                            {log.food_name}
-                          </span>
-                          <span className="flex-shrink-0 text-on-surface-variant">
-                            {Math.round(log.calories)} kcal
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingLogId(log.id);
-                              setEditQuantity(log.quantity);
-                            }}
-                            aria-label={`Edit ${log.food_name}`}
-                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant"
-                          >
-                            <span className="material-symbols-outlined text-sm">edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={logActionBusy === log.id}
-                            onClick={() => handleDeleteLog(log)}
-                            aria-label={`Remove ${log.food_name}`}
-                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-fat disabled:opacity-60"
-                          >
-                            <span className="material-symbols-outlined text-sm">delete</span>
-                          </button>
-                        </li>
-                      ),
-                    )}
-                  </ul>
+        <div className="lg:grid lg:grid-cols-3 lg:items-start lg:gap-4">
+          {/* Diary column */}
+          <div className="space-y-4 lg:col-span-2">
+            {/* Daily totals */}
+            <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    Energy budget
+                  </p>
+                  <div className="mt-0.5 flex items-baseline gap-1">
+                    <span className="font-display text-3xl font-bold tracking-tight text-on-surface">
+                      {remainingCalories}
+                    </span>
+                    <span className="text-base font-medium text-on-surface-variant">
+                      kcal left
+                    </span>
+                  </div>
                 </div>
-              ),
-            )
-          )}
-        </section>
+                <div className="relative flex h-20 w-20 items-center justify-center">
+                  <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90 transform">
+                    <circle
+                      cx="38"
+                      cy="38"
+                      r="32"
+                      fill="transparent"
+                      stroke="var(--color-surface-container-high)"
+                      strokeWidth="7"
+                    />
+                    <circle
+                      cx="38"
+                      cy="38"
+                      r="32"
+                      fill="transparent"
+                      stroke="var(--color-primary)"
+                      strokeWidth="7"
+                      strokeLinecap="round"
+                      strokeDasharray={201.06}
+                      strokeDashoffset={201.06 * (1 - percentOfTarget / 100)}
+                      className="transition-all duration-700"
+                    />
+                  </svg>
+                  <span className="absolute text-sm font-bold text-on-surface">
+                    {percentOfTarget}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-2">
+                <div className="px-2 py-1">
+                  <p className="text-xs text-on-surface-variant">Consumed</p>
+                  <p className="font-semibold text-on-surface" data-testid="consumed-calories">
+                    {Math.round(consumed.calories)}{" "}
+                    <span className="text-xs font-normal text-on-surface-variant">kcal</span>
+                  </p>
+                </div>
+                <div className="px-2 py-1">
+                  <p className="text-xs text-on-surface-variant">Daily goal</p>
+                  <p className="font-semibold text-on-surface">
+                    {profile.target_calories}{" "}
+                    <span className="text-xs font-normal text-on-surface-variant">kcal</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {MACRO_ROWS.map(({ key, label, colorVar }) => {
+                  const target = profile[`target_${key}` as keyof typeof profile] as number;
+                  const value = consumed[key];
+                  const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
+                  return (
+                    <div key={key} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 font-semibold text-on-surface">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: colorVar }}
+                          />
+                          {label}
+                        </span>
+                        <span className="text-on-surface-variant">
+                          <strong className="text-on-surface">{Math.round(value)}g</strong> /{" "}
+                          {target}g
+                        </span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${pct}%`, backgroundColor: colorVar }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Meal-by-meal diary */}
+            {foodLogs === null ? (
+              <p className="text-sm text-on-surface-variant">Loading your diary…</p>
+            ) : (
+              <div data-testid="diary" className="space-y-4">
+                {MEAL_TYPES.map((meal) => (
+                  <DiaryMeal
+                    key={meal}
+                    meal={meal}
+                    entries={mealsByType[meal]}
+                    busyLogId={logActionBusy}
+                    onSave={handleSaveEntry}
+                    onDelete={handleDeleteEntry}
+                    onAddFood={focusPickerOn}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Logging column */}
+          <div className="mt-4 space-y-4 lg:mt-0">
+            <div ref={pickerRef}>
+              <FoodPicker
+                meal={pickerMeal}
+                onMealChange={setPickerMeal}
+                onLogged={reloadDay}
+                refreshKey={diaryVersion}
+              />
+            </div>
+
+            <WaterCard
+              totalMl={waterTotal}
+              goalMl={waterGoal}
+              glassSizes={glassSizes ?? []}
+              onQuickLog={handleQuickWater}
+              onRemove={handleRemoveWater}
+              onGlassAdded={reloadDay}
+              busy={waterBusy}
+            />
+
+            {suggestions && (
+              <section
+                data-testid="suggestions-card"
+                className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-5 shadow-sm"
+              >
+                <div className="mb-1 flex items-center gap-1.5 text-primary">
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true">psychology</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">
+                    What to eat next
+                  </span>
+                </div>
+                <p className="mb-1 text-xs text-on-surface-variant">
+                  Based on what&apos;s left today: {suggestions.remaining_calories} kcal
+                  {suggestions.protein_is_priority
+                    ? ` · ${suggestions.remaining_protein_g}g protein still needed`
+                    : " · protein goal on track"}
+                </p>
+                <p
+                  data-testid="suggestions-message"
+                  className="mb-3 text-sm text-on-surface-variant"
+                >
+                  {suggestions.message}
+                </p>
+                {suggestions.suggestions.length > 0 && (
+                  <div className="space-y-2">
+                    {suggestions.suggestions.map((food) => (
+                      <div
+                        key={food.id}
+                        className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-on-surface">
+                            {food.name}
+                          </p>
+                          <p className="text-xs text-on-surface-variant">
+                            {Math.round(food.calories)} kcal · P {Math.round(food.protein_g)}g
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleSuggestionAdd(food.id)}
+                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
+                          aria-label={`Add ${food.name}`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </div>
       </div>
     </main>
   );
@@ -729,13 +471,17 @@ function WaterCard({
   goalMl,
   glassSizes,
   onQuickLog,
+  onRemove,
   onGlassAdded,
+  busy,
 }: {
   totalMl: number;
   goalMl: number;
   glassSizes: GlassSize[];
   onQuickLog: (ml: number) => void;
+  onRemove: (ml: number) => void;
   onGlassAdded: () => void;
+  busy: boolean;
 }) {
   const [addingSize, setAddingSize] = useState(false);
   const [label, setLabel] = useState("");
@@ -760,6 +506,8 @@ function WaterCard({
     (min, g) => Math.min(min, g.volume_ml),
     quickOptions[0]?.volume_ml ?? 250,
   );
+  const glassesDone = unitMl > 0 ? totalMl / unitMl : 0;
+  const glassesGoal = unitMl > 0 ? Math.max(1, Math.round(goalMl / unitMl)) : 1;
 
   return (
     <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
@@ -767,7 +515,7 @@ function WaterCard({
         <div>
           <h3 className="text-sm font-semibold text-on-surface">Hydration</h3>
           <p className="text-xs text-on-surface-variant">
-            Daily target: {goalMl} ml · {unitMl} ml glass
+            {Math.round(glassesDone * 10) / 10} of {glassesGoal} glasses · {unitMl} ml each
           </p>
         </div>
         <span
@@ -777,15 +525,24 @@ function WaterCard({
           {totalMl} <span className="text-xs font-normal text-on-surface-variant">ml</span>
         </span>
       </div>
+      <p className="mt-0.5 text-xs text-on-surface-variant">Daily target: {goalMl} ml</p>
       <div className="mt-3">
-        <WaterGlasses totalMl={totalMl} unitMl={unitMl} goalMl={goalMl} />
+        <WaterGlasses
+          totalMl={totalMl}
+          unitMl={unitMl}
+          goalMl={goalMl}
+          onAdd={() => onQuickLog(unitMl)}
+          onRemove={totalMl > 0 ? () => onRemove(unitMl) : undefined}
+          disabled={busy}
+        />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {quickOptions.map((g) => (
           <button
             key={g.id}
             onClick={() => onQuickLog(g.volume_ml)}
-            className="rounded-[var(--radius-control)] bg-surface-container-low px-3 py-1.5 text-xs font-semibold text-water"
+            disabled={busy}
+            className="rounded-[var(--radius-control)] bg-surface-container-low px-3 py-1.5 text-xs font-semibold text-water disabled:opacity-50"
           >
             +{g.volume_ml}ml
           </button>
@@ -798,7 +555,7 @@ function WaterCard({
         </button>
       </div>
       {addingSize && (
-        <form onSubmit={handleAddSize} className="mt-3 flex items-end gap-2">
+        <form onSubmit={handleAddSize} className="mt-3 flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
             Label
             <input

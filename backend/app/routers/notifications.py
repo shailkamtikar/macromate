@@ -13,19 +13,23 @@ router = APIRouter(prefix="/api/notification-settings", tags=["notifications"])
 
 
 class NotificationSettingsOut(BaseModel):
+    notifications_enabled: bool
     logging_reminders_enabled: bool
     reminder_times: list[str]
     streak_warnings_enabled: bool
     macro_nudges_enabled: bool
+    friend_activity_enabled: bool
     quiet_hours_start: str | None
     quiet_hours_end: str | None
 
 
 class NotificationSettingsIn(BaseModel):
+    notifications_enabled: bool = True
     logging_reminders_enabled: bool = True
     reminder_times: list[str] = []
     streak_warnings_enabled: bool = True
     macro_nudges_enabled: bool = True
+    friend_activity_enabled: bool = True
     quiet_hours_start: str | None = None
     quiet_hours_end: str | None = None
 
@@ -37,13 +41,28 @@ class TriggerOut(BaseModel):
 
 
 _DEFAULTS = NotificationSettingsOut(
+    notifications_enabled=True,
     logging_reminders_enabled=True,
     reminder_times=[],
     streak_warnings_enabled=True,
     macro_nudges_enabled=True,
+    friend_activity_enabled=True,
     quiet_hours_start=None,
     quiet_hours_end=None,
 )
+
+
+def _settings_out(r: dict) -> NotificationSettingsOut:
+    return NotificationSettingsOut(
+        notifications_enabled=r["notifications_enabled"],
+        logging_reminders_enabled=r["logging_reminders_enabled"],
+        reminder_times=r["reminder_times"],
+        streak_warnings_enabled=r["streak_warnings_enabled"],
+        macro_nudges_enabled=r["macro_nudges_enabled"],
+        friend_activity_enabled=r["friend_activity_enabled"],
+        quiet_hours_start=r["quiet_hours_start"],
+        quiet_hours_end=r["quiet_hours_end"],
+    )
 
 
 @router.get("", response_model=NotificationSettingsOut)
@@ -52,15 +71,7 @@ def get_settings_(current_user: CurrentUserDep) -> NotificationSettingsOut:
     rows = db.select("notification_settings", {"user_id": f"eq.{current_user.user_id}", "select": "*"})
     if not rows:
         return _DEFAULTS
-    r = rows[0]
-    return NotificationSettingsOut(
-        logging_reminders_enabled=r["logging_reminders_enabled"],
-        reminder_times=r["reminder_times"],
-        streak_warnings_enabled=r["streak_warnings_enabled"],
-        macro_nudges_enabled=r["macro_nudges_enabled"],
-        quiet_hours_start=r["quiet_hours_start"],
-        quiet_hours_end=r["quiet_hours_end"],
-    )
+    return _settings_out(rows[0])
 
 
 @router.put("", response_model=NotificationSettingsOut)
@@ -68,22 +79,17 @@ def update_settings(payload: NotificationSettingsIn, current_user: CurrentUserDe
     db = SupabaseAdmin()
     data = {
         "user_id": current_user.user_id,
+        "notifications_enabled": payload.notifications_enabled,
         "logging_reminders_enabled": payload.logging_reminders_enabled,
         "reminder_times": payload.reminder_times,
         "streak_warnings_enabled": payload.streak_warnings_enabled,
         "macro_nudges_enabled": payload.macro_nudges_enabled,
+        "friend_activity_enabled": payload.friend_activity_enabled,
         "quiet_hours_start": payload.quiet_hours_start,
         "quiet_hours_end": payload.quiet_hours_end,
     }
     row = db.insert("notification_settings", data, prefer="resolution=merge-duplicates,return=representation")[0]
-    return NotificationSettingsOut(
-        logging_reminders_enabled=row["logging_reminders_enabled"],
-        reminder_times=row["reminder_times"],
-        streak_warnings_enabled=row["streak_warnings_enabled"],
-        macro_nudges_enabled=row["macro_nudges_enabled"],
-        quiet_hours_start=row["quiet_hours_start"],
-        quiet_hours_end=row["quiet_hours_end"],
-    )
+    return _settings_out(row)
 
 
 def _parse_time(value: str | None) -> time | None:
@@ -139,6 +145,7 @@ def check_triggers_now(current_user: CurrentUserDep) -> list[TriggerOut]:
 
     triggers: list[NotificationTrigger] = evaluate_triggers(
         now_time=now.time(),
+        notifications_enabled=settings.get("notifications_enabled", True),
         logging_reminders_enabled=settings.get("logging_reminders_enabled", True),
         reminder_times=reminder_times,
         streak_warnings_enabled=settings.get("streak_warnings_enabled", True),

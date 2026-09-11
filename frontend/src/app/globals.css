@@ -147,3 +147,41 @@ body {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
   }
 }
+
+/* A single, restrained reveal used for newly-unlocked achievements and
+   fresh activity/list items -- a subtle scale+fade, never confetti/glow.
+   Defined only inside the no-preference query, so prefers-reduced-motion
+   users simply get the element at its resting state with no animation. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes reveal-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  .reveal-in {
+    animation: reveal-in 260ms ease-out both;
+  }
+}
+
+/* Bootstrap loader: a calm, slow breathing pulse on the brand mark -- never
+   a spinner, never fast/attention-grabbing. Reduced-motion users get the
+   mark at a fixed, fully-visible opacity with no animation. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes bootstrap-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+  .bootstrap-breathe {
+    animation: bootstrap-breathe 1.8s ease-in-out infinite;
+  }
+}

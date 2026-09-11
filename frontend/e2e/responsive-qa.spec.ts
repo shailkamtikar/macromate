@@ -59,9 +59,14 @@ async function deleteUser(userId: string) {
 }
 
 const PAGES = ["/today", "/calculate", "/coach", "/progress", "/friends", "/profile"];
+// Phase 2 (app sidebar) explicitly calls out these sizes: three common
+// mobile widths plus two common laptop/desktop widths.
 const VIEWPORTS = [
-  { name: "mobile", width: 390, height: 844 },
-  { name: "desktop", width: 1440, height: 900 },
+  { name: "mobile-375", width: 375, height: 812 },
+  { name: "mobile-390", width: 390, height: 844 },
+  { name: "mobile-430", width: 430, height: 932 },
+  { name: "desktop-1280", width: 1280, height: 800 },
+  { name: "desktop-1440", width: 1440, height: 900 },
 ];
 
 test("no horizontal overflow on any main page, mobile and desktop", async ({ page }) => {
@@ -83,6 +88,50 @@ test("no horizontal overflow on any main page, mobile and desktop", async ({ pag
         );
         expect(hasOverflow, `${path} overflows horizontally at ${viewport.name}`).toBe(false);
       }
+    }
+  } finally {
+    await deleteUser(user.userId);
+  }
+});
+
+test("app sidebar (rail, collapsed rail, and mobile drawer) never causes horizontal overflow", async ({
+  page,
+}) => {
+  const user = await createOnboardedUser();
+  try {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(user.email);
+    await page.getByLabel("Password").fill(user.password);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
+
+    async function hasOverflow() {
+      return page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      );
+    }
+
+    // Desktop: expanded rail, then collapsed rail — neither should widen
+    // the document past the viewport, and content keeps the extra width
+    // once collapsed.
+    for (const viewport of VIEWPORTS.filter((v) => v.name.startsWith("desktop"))) {
+      await page.setViewportSize(viewport);
+      await page.goto("/today");
+      expect(await hasOverflow(), `expanded rail overflows at ${viewport.name}`).toBe(false);
+      await page.getByTestId("app-sidebar-toggle").click();
+      await expect(page.getByTestId("app-sidebar").getByText("MacroMate")).not.toBeVisible();
+      expect(await hasOverflow(), `collapsed rail overflows at ${viewport.name}`).toBe(false);
+      await page.getByTestId("app-sidebar-toggle").click(); // reset for the next viewport
+    }
+
+    // Mobile: the open drawer must not push the page wider than the
+    // viewport either.
+    for (const viewport of VIEWPORTS.filter((v) => v.name.startsWith("mobile"))) {
+      await page.setViewportSize(viewport);
+      await page.goto("/today");
+      await page.getByRole("button", { name: "Menu" }).click();
+      await expect(page.getByRole("dialog", { name: "Menu" })).toBeVisible();
+      expect(await hasOverflow(), `open mobile drawer overflows at ${viewport.name}`).toBe(false);
     }
   } finally {
     await deleteUser(user.userId);

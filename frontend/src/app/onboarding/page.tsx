@@ -1,14 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { ActivityLevel, BiologicalSex, Goal, MacroMode, MacroTargetsResponse } from "@/lib/api";
 import { ActivityLevelPicker } from "@/components/ActivityLevelPicker";
+import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { NumericField } from "@/components/NumericField";
 import { RatePicker } from "@/components/RatePicker";
 import { TargetsEditor } from "@/components/TargetsEditor";
 import { browserTimezone } from "@/lib/date";
+import { useRefetchProfile } from "@/lib/ProfileProvider";
 import { supabase } from "@/lib/supabaseClient";
+import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
 
 const GOAL_LABELS: Record<Goal, string> = {
@@ -22,6 +25,8 @@ const STEP_TITLES = ["Basics", "Activity level", "Goal & pace", "Your targets"];
 export default function OnboardingPage() {
   const router = useRouter();
   const { session, loading: sessionLoading } = useSession();
+  const profile = useProfile(session?.user.id);
+  const refetchProfile = useRefetchProfile();
 
   const [step, setStep] = useState(0);
 
@@ -40,8 +45,17 @@ export default function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // A returning user with a completed profile has no reason to be here —
+    // re-running the wizard would silently overwrite their real profile
+    // (weight, goal, custom macros) with these defaults. Send them back to
+    // the dashboard instead; profile edits belong to the Profile & settings
+    // dialog, not this one-time flow.
+    if (profile) router.push("/today");
+  }, [profile, router]);
+
   if (sessionLoading) {
-    return <p className="p-10 text-sm text-on-surface-variant">Loading…</p>;
+    return <BootstrapLoader />;
   }
 
   if (!session) {
@@ -56,6 +70,10 @@ export default function OnboardingPage() {
         </p>
       </main>
     );
+  }
+
+  if (profile === undefined || profile) {
+    return <BootstrapLoader />;
   }
 
   const currentSession = session;
@@ -105,6 +123,10 @@ export default function OnboardingPage() {
         .insert({ user_id: currentSession.user.id, weight_kg: weightKg });
       if (weightLogError) throw weightLogError;
 
+      // The shared ProfileProvider cache still has the pre-onboarding
+      // "no profile yet" (null) result -- without this, Today would read
+      // that stale null and immediately redirect back to onboarding.
+      await refetchProfile();
       router.push("/today");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save profile.");
@@ -232,17 +254,27 @@ export default function OnboardingPage() {
           )}
 
           {step === 3 && (
-            <TargetsEditor
-              weightKg={weightKg}
-              heightCm={heightCm}
-              ageYears={ageYears}
-              sex={sex}
-              activityLevel={activityLevel}
-              goal={goal}
-              rateKgPerWeek={rateKgPerWeek}
-              onResult={setTargetsResult}
-              onMacroModeChange={setMacroMode}
-            />
+            <div className="space-y-4">
+              <TargetsEditor
+                weightKg={weightKg}
+                heightCm={heightCm}
+                ageYears={ageYears}
+                sex={sex}
+                activityLevel={activityLevel}
+                goal={goal}
+                rateKgPerWeek={rateKgPerWeek}
+                onResult={setTargetsResult}
+                onMacroModeChange={setMacroMode}
+              />
+              {targetsResult && (
+                <div className="flex items-center justify-between rounded-[var(--radius-control)] border border-outline-variant bg-surface-container p-3">
+                  <span className="text-sm font-medium text-on-surface">Daily hydration goal</span>
+                  <span className="font-display text-lg font-bold text-on-surface">
+                    {(targetsResult.water_goal_ml / 1000).toFixed(1)} L
+                  </span>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

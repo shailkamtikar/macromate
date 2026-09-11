@@ -38,7 +38,7 @@ export function ActivityLevelPicker({ value, onChange }: ActivityLevelPickerProp
                 }`}
               >
                 {selected && (
-                  <span className="material-symbols-outlined text-xs text-on-primary">check</span>
+                  <span className="material-symbols-outlined text-xs text-on-primary" aria-hidden="true">check</span>
                 )}
               </span>
             </div>

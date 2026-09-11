@@ -134,7 +134,10 @@ test("login -> onboarding -> log food -> log water -> Today reflects it", async 
     await submitButton.click();
 
     await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
-    await expect(page.getByText("Today's Balance")).toBeVisible();
+    // getByRole, not getByText -- Next's accessibility route-announcer also
+    // briefly contains this exact string on navigation, which a plain text
+    // match can collide with.
+    await expect(page.getByRole("heading", { name: "Today's Diary" })).toBeVisible();
 
     // Log the seeded food via the real search -> add flow.
     await page.getByPlaceholder("Search foods…").fill(foodName);
@@ -145,7 +148,7 @@ test("login -> onboarding -> log food -> log water -> Today reflects it", async 
     // Meal timeline should now show it, with its 150 kcal, scoped to that
     // specific row to avoid matching the "0g / 150g" macro-target text
     // that also happens to contain "150" elsewhere on the page.
-    const mealRow = page.locator("li", { hasText: foodName });
+    const mealRow = page.getByTestId("diary").locator("li", { hasText: foodName });
     await expect(mealRow).toBeVisible({ timeout: 10_000 });
     await expect(mealRow).toContainText("150 kcal");
 

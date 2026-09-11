@@ -83,3 +83,8 @@ def test_disabled_settings_suppress_their_category():
         **_base_kwargs(logging_reminders_enabled=False, streak_warnings_enabled=False, macro_nudges_enabled=False)
     )
     assert triggers == []
+
+
+def test_master_switch_suppresses_every_category_even_when_individually_enabled():
+    triggers = evaluate_triggers(**_base_kwargs(notifications_enabled=False))
+    assert triggers == []

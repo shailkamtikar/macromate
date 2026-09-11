@@ -5,15 +5,10 @@ from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
-from app.domain.achievements import build_achievements
+from app.domain.achievements import STREAK_LOOKBACK_DAYS, build_achievements
 from app.domain.timeutil import day_bounds_utc, local_today, utc_timestamp_to_local_date
 
 router = APIRouter(prefix="/api", tags=["achievements"])
-
-# How far back to look for streak calculation — 60 days is generous
-# headroom above the longest milestone (30) without scanning the user's
-# entire history on every request.
-STREAK_LOOKBACK_DAYS = 60
 
 
 class AchievementsOut(BaseModel):

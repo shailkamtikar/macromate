@@ -3,12 +3,21 @@ database (food_items) or a logged snapshot — never invented by AI. This
 module only scales per-serving values by quantity and rounds for display.
 """
 
+import re
 from dataclasses import dataclass
 
 # A food_items row is treated as "close enough to be a likely duplicate" at
 # or above this trigram similarity score (0..1), surfaced to the user as a
 # suggestion rather than silently blocking creation (PRD §3.2).
 DUPLICATE_SIMILARITY_THRESHOLD = 0.4
+
+# Matches an explicit weight/volume inside a free-text serving description:
+# "100g", "1 bowl (150 g)", "250 ml". Requires the unit, so a plain count
+# like "2 slices" correctly yields nothing.
+_SERVING_WEIGHT_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|millilitre|milliliter|millilitres|milliliters)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,35 @@ def compute_nutrition_snapshot(
         carbs_g=round(carbs_g_per_serving * quantity, 1),
         fat_g=round(fat_g_per_serving * quantity, 1),
     )
+
+
+@dataclass(frozen=True)
+class ServingWeight:
+    """The measured weight/volume of exactly one serving."""
+
+    amount: float
+    unit: str  # "g" or "ml"
+
+
+def parse_serving_weight(serving_description: str | None) -> ServingWeight | None:
+    """Reads the weight of one serving out of its free-text description so
+    the UI can offer weight-based entry ("200 g") alongside serving-based
+    entry ("2 x 1 bowl"), converting between them deterministically.
+
+    Returns None when the description carries no explicit weight (e.g.
+    "2 slices") — the app then only offers servings rather than inventing
+    a gram equivalent it has no basis for.
+    """
+    if not serving_description:
+        return None
+    match = _SERVING_WEIGHT_RE.search(serving_description)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    if amount <= 0:
+        return None
+    unit = "ml" if match.group(2).lower().startswith("m") else "g"
+    return ServingWeight(amount=amount, unit=unit)
 
 
 def likely_duplicates(

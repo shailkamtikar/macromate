@@ -79,6 +79,9 @@ test("onboarding: activity-level education, cut rate selection, and calorie over
 
     // Targets step: recommended vs selected, editable via the slider.
     await expect(page.getByText("Recommended")).toBeVisible({ timeout: 10_000 });
+    // Hydration goal must be shown before the user confirms, not just
+    // silently saved and revealed for the first time on Today.
+    await expect(page.getByText("Daily hydration goal")).toBeVisible();
     const submitButton = page.getByRole("button", { name: "Save & continue" });
     await expect(submitButton).toBeEnabled({ timeout: 10_000 });
 
@@ -160,6 +163,62 @@ test("onboarding: custom macros inconsistent with calorie target show a validati
     await page.getByLabel("Custom carbs grams").fill("337");
     await page.getByLabel("Custom fat grams").fill("71");
     await expect(submitButton).toBeEnabled({ timeout: 10_000 });
+  } finally {
+    await deleteUser(user.userId);
+  }
+});
+
+test("a returning user with a completed profile is redirected away from onboarding instead of re-running the wizard", async ({
+  page,
+}) => {
+  const user = await createConfirmedUser("onboard-returning");
+  try {
+    // Seed a fully completed profile directly — this user has already
+    // finished onboarding in a prior session.
+    await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        id: user.userId,
+        username: `returning${Date.now() % 1000000}`,
+        sex: "female",
+        age_years: 40,
+        height_cm: 165,
+        activity_level: "light",
+        goal: "maintain",
+        macro_mode: "custom",
+        target_calories: 1900,
+        target_protein_g: 150,
+        target_carbs_g: 190,
+        target_fat_g: 60,
+        water_goal_ml: 2200,
+      }),
+    });
+    await fetch(`${SUPABASE_URL}/rest/v1/weight_logs`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({ user_id: user.userId, weight_kg: 68 }),
+    });
+
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(user.email);
+    await page.getByLabel("Password").fill(user.password);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
+
+    // Even a direct visit to /onboarding must bounce straight back — never
+    // silently re-run the wizard and overwrite the real (custom) profile.
+    await page.goto("/onboarding");
+    await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
+
+    const profileRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.userId}&select=target_calories,macro_mode,goal`,
+      { headers: adminHeaders },
+    );
+    const [savedProfile] = await profileRes.json();
+    expect(savedProfile.target_calories).toBe(1900);
+    expect(savedProfile.macro_mode).toBe("custom");
+    expect(savedProfile.goal).toBe("maintain");
   } finally {
     await deleteUser(user.userId);
   }

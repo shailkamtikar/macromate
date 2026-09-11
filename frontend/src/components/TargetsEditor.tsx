@@ -7,6 +7,7 @@ import {
   BiologicalSex,
   Goal,
   MACRO_CALORIE_TOLERANCE_PCT,
+  MIN_SAFE_DAILY_CALORIES,
   MacroMode,
   MacroTargetsResponse,
   fetchMacroTargets,
@@ -73,13 +74,13 @@ export function TargetsEditor({
   const userEditedCaloriesRef = useRef(false);
 
   const [result, setResult] = useState<MacroTargetsResponse | null>(null);
-  // Kept separately from `result` and never cleared by a *custom-macro or
-  // override* validation failure — the recommendation itself is still
-  // valid even when the user's chosen macros/calories aren't, and the
-  // validation message (and slider bounds) need it to stay on screen.
-  const [recommendedInfo, setRecommendedInfo] = useState<{ calories: number; bmr: number } | null>(
-    null,
-  );
+  // The *bare* (no override/custom-macro) response — kept separately from
+  // `result` and never cleared by an override/custom-macro validation
+  // failure, since the recommendation itself is still valid even when the
+  // user's chosen calories/macros aren't, and the UI (slider bounds,
+  // "recommended vs selected", the capped-rate/low-calorie messaging)
+  // needs it to stay on screen regardless.
+  const [recommendedInfo, setRecommendedInfo] = useState<MacroTargetsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,14 +122,16 @@ export function TargetsEditor({
         // are currently set, so it stays available even if the "real"
         // call below fails validation.
         const bare = await fetchMacroTargets(basis);
-        setRecommendedInfo({ calories: bare.recommended_calories, bmr: bare.bmr });
+        setRecommendedInfo(bare);
 
         let effectiveOverride = calorieOverride;
         if (effectiveOverride !== null && !userEditedCaloriesRef.current) {
           // Reconcile a pre-filled (not user-edited) override against the
-          // *current* recommendation before using it as an override.
-          const floor = Math.max(1200, bare.bmr);
-          const min = Math.max(bare.recommended_calories - 500, floor);
+          // *current* recommendation before using it as an override. The
+          // floor here is the flat absolute safety minimum — never
+          // BMR-derived, which would let a low-TDEE user's own resting
+          // rate silently determine (and corrupt) the editable range.
+          const min = Math.max(bare.recommended_calories - 500, MIN_SAFE_DAILY_CALORIES);
           const max = bare.recommended_calories + 500;
           const clamped = Math.min(Math.max(effectiveOverride, min), max);
           if (clamped !== effectiveOverride) {
@@ -176,11 +179,16 @@ export function TargetsEditor({
     customFat,
   ]);
 
-  const recommended = recommendedInfo?.calories ?? null;
-  const bmr = recommendedInfo?.bmr ?? null;
+  const recommended = recommendedInfo?.recommended_calories ?? null;
   const selectedCalories = calorieOverride ?? recommended ?? 0;
-  const safeFloor = bmr ? Math.max(1200, bmr) : 1200;
-  const sliderMin = recommended ? Math.max(recommended - 500, safeFloor) : safeFloor;
+  // The manual slider's *typical* editable range is a UX convenience, not
+  // the calculation itself — it always tracks the current recommendation
+  // (±500 kcal) rather than a fixed band, so it stays meaningful for both
+  // a naturally low and a naturally high recommended value. The absolute
+  // floor is flat (never derived from this user's own BMR).
+  const sliderMin = recommended
+    ? Math.max(recommended - 500, MIN_SAFE_DAILY_CALORIES)
+    : MIN_SAFE_DAILY_CALORIES;
   const sliderMax = recommended ? recommended + 500 : 3500;
 
   const impliedCalories =
@@ -192,20 +200,53 @@ export function TargetsEditor({
       ? Math.abs(impliedCalories - selectedCalories) / selectedCalories > MACRO_CALORIE_TOLERANCE_PCT
       : false;
 
+  const finalLowCalorieWarning = result?.low_calorie_warning ?? recommendedInfo?.low_calorie_warning ?? null;
+
   return (
     <div className="space-y-4">
+      {recommendedInfo?.is_rate_capped && recommendedInfo.cap_explanation && (
+        <div
+          data-testid="rate-cap-banner"
+          className="rounded-[var(--radius-card)] border border-carbs/40 bg-carbs/10 p-3 text-xs text-on-surface"
+        >
+          <p className="font-semibold">
+            Requested: {formatRateLabel(goal, recommendedInfo.requested_rate_kg_per_week)}
+          </p>
+          {recommendedInfo.applied_rate_kg_per_week !== null && (
+            <p className="mt-0.5">
+              Recommended maximum: {formatRateLabel(goal, recommendedInfo.applied_rate_kg_per_week)}
+            </p>
+          )}
+          <p className="mt-1 text-on-surface-variant">{recommendedInfo.cap_explanation}</p>
+        </div>
+      )}
+
       <div className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-low p-4">
         <div className="flex items-center justify-between text-xs text-on-surface-variant">
-          <span>Recommended</span>
-          <span className="font-semibold text-on-surface">
+          <span>Estimated maintenance</span>
+          <span data-testid="maintenance-calories" className="font-semibold text-on-surface">
+            {recommendedInfo ? `${recommendedInfo.maintenance_calories} kcal/day` : "…"}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center justify-between text-xs text-on-surface-variant">
+          <span>Suggested intake</span>
+          <span data-testid="suggested-intake" className="font-semibold text-on-surface">
             {recommended ? `${recommended} kcal/day` : "…"}
           </span>
         </div>
+        {recommendedInfo && recommendedInfo.daily_energy_change_kcal !== 0 && (
+          <div className="mt-1 flex items-center justify-between text-xs text-on-surface-variant">
+            <span>Daily {recommendedInfo.daily_energy_change_kcal < 0 ? "deficit" : "surplus"}</span>
+            <span data-testid="daily-energy-change" className="font-semibold text-on-surface">
+              {Math.abs(recommendedInfo.daily_energy_change_kcal)} kcal
+            </span>
+          </div>
+        )}
         <div className="mt-3 flex items-center justify-between">
           <label htmlFor="calorie-slider" className="text-sm font-semibold text-on-surface">
             Your daily calorie target
           </label>
-          <span className="font-display text-lg font-bold text-on-surface">
+          <span data-testid="selected-calories" className="font-display text-lg font-bold text-on-surface">
             {selectedCalories} <span className="text-xs font-normal">kcal</span>
           </span>
         </div>
@@ -261,6 +302,9 @@ export function TargetsEditor({
                 : `${recommended - selectedCalories} kcal below recommended.`}
           </p>
         )}
+        {finalLowCalorieWarning && (
+          <p className="mt-2 text-xs text-fat">{finalLowCalorieWarning}</p>
+        )}
       </div>
 
       <div className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-low p-4">
@@ -299,7 +343,9 @@ export function TargetsEditor({
                     />
                     {label}
                   </span>
-                  <span className="font-semibold text-on-surface">{result.targets[key]}g</span>
+                  <span data-testid={`macro-${key}`} className="font-semibold text-on-surface">
+                    {result.targets[key]}g
+                  </span>
                 </div>
               ))}
             <p className="pt-1 text-xs text-on-surface-variant">
@@ -363,4 +409,13 @@ export function TargetsEditor({
       {error && <p className="text-xs text-fat">{error}</p>}
     </div>
   );
+}
+
+/** "Lose 0.7 kg/week" / "Gain 0.25 kg/week" / "Maintain" — the same
+ * calm, human phrasing used everywhere else a rate is shown. */
+function formatRateLabel(goal: Goal, rateKgPerWeek: number | null): string {
+  if (goal === "maintain" || rateKgPerWeek === null) return "Maintain";
+  const verb = goal === "cut" ? "Lose" : "Gain";
+  const rate = Math.round(rateKgPerWeek * 100) / 100;
+  return `${verb} ${rate} kg/week`;
 }

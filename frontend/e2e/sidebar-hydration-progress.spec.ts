@@ -101,33 +101,39 @@ test("hydration renders as glasses sized to the user's configured glass, filling
   }
 });
 
-test("profile/settings sidebar opens from a non-Today screen and reuses the real Profile content", async ({
+test("app sidebar is available from a non-Today screen and its editor reuses the real Profile content", async ({
   page,
 }) => {
   const user = await createOnboardedUser("sidebar");
   try {
     await login(page, user.email, user.password);
 
-    // Navigate away from Today first — the trigger must still be there.
+    // Navigate away from Today first — the persistent sidebar must still
+    // be there, since it's rendered by the shared application shell, not
+    // copy-pasted per page.
     await page.goto("/progress");
-    await expect(page.getByText("Adherence")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Macro adherence")).toBeVisible({ timeout: 10_000 });
 
-    const trigger = page.getByRole("button", { name: "Profile & settings" });
-    await expect(trigger).toBeVisible();
-    await trigger.click();
+    const sidebar = page.getByTestId("app-sidebar");
+    await expect(sidebar).toBeVisible();
+    await sidebar.getByRole("button", { name: "Profile" }).click();
+    await sidebar.getByRole("button", { name: "Edit profile" }).click();
 
     const panel = page.getByRole("dialog", { name: "Profile & settings" });
     await expect(panel).toBeVisible();
     // Real profile content (weight/activity/goal/targets), not a
     // duplicated mini settings form.
     await expect(panel.getByLabel("Current weight (kg)")).toBeVisible();
-    await expect(panel.getByRole("button", { name: "Log out" })).toBeVisible();
 
     // Still on /progress underneath — opening the panel doesn't navigate.
     await expect(page).toHaveURL(/\/progress/);
 
     await page.getByRole("button", { name: "Close profile & settings" }).click();
     await expect(panel).not.toBeVisible();
+
+    // Logout lives in the sidebar itself, visually separated at the
+    // bottom (Account), not inside the editor panel.
+    await expect(sidebar.getByRole("button", { name: "Log out" })).toBeVisible();
   } finally {
     await deleteUser(user.userId);
   }
@@ -144,9 +150,13 @@ test("numeric fields don't show an unwanted zero when cleared and don't reformat
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
 
-    // This user already has a profile -> Today, not onboarding. Use the
-    // sidebar's embedded Profile form, which has the same weight field.
-    await page.getByRole("button", { name: "Profile & settings" }).click();
+    // This user already has a profile -> Today, not onboarding. Open the
+    // real editor from the sidebar's Weight goal section, which shares the
+    // same weight field.
+    const sidebar = page.getByTestId("app-sidebar");
+    await sidebar.getByRole("button", { name: "Weight goal" }).click();
+    await sidebar.getByRole("button", { name: "Edit weight & goal" }).click();
+
     const weightInput = page.getByLabel("Current weight (kg)");
     await expect(weightInput).toBeVisible();
 

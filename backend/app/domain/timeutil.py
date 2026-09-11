@@ -34,6 +34,21 @@ def day_bounds_utc(local_date: date, tz_name: str | None) -> tuple[datetime, dat
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
+def infer_meal_type(tz_name: str | None) -> str:
+    """Same time-of-day buckets the frontend already uses (see
+    frontend/src/lib/servings.ts inferMealType) -- used when the Coach's
+    add-food action has no meal stated or clearly implied, so a default
+    still matches what the rest of the app would infer."""
+    hour = datetime.now(resolve_timezone(tz_name)).hour
+    if hour < 11:
+        return "breakfast"
+    if hour < 15:
+        return "lunch"
+    if hour < 18:
+        return "snack"
+    return "dinner"
+
+
 def utc_timestamp_to_local_date(timestamp: str | datetime, tz_name: str | None) -> date:
     dt = (
         datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
