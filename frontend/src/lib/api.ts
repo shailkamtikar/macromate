@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { getAccessToken } from "@/lib/SessionProvider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -180,17 +180,18 @@ export class ApiError extends Error {
 }
 
 async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) {
+  // Reads the token SessionProvider already keeps current, instead of
+  // independently awaiting supabase.auth.getSession() on every call -- see
+  // the comment on getAccessToken in lib/SessionProvider.tsx.
+  const token = getAccessToken();
+  if (!token) {
     throw new ApiError("Not signed in", 401);
   }
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
+      Authorization: `Bearer ${token}`,
       ...init.headers,
     },
   });

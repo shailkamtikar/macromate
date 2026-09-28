@@ -24,6 +24,15 @@ interface DiaryMealProps {
   onAddFood: (meal: MealType) => void;
 }
 
+/** True while a log is still an optimistic placeholder (its add hasn't been
+ * confirmed by the server yet). Editing or deleting it would send a request
+ * for an id the backend has never heard of -- the window is normally just
+ * one network round-trip, so disabling these two actions until it closes
+ * costs nothing perceptible while keeping edit/delete correct. */
+function isPending(log: FoodLog) {
+  return log.id.startsWith("temp-");
+}
+
 function totalsFor(entries: FoodLog[]) {
   return entries.reduce(
     (acc, e) => ({
@@ -63,8 +72,13 @@ export function DiaryMeal({
   async function saveEdit(log: FoodLog) {
     const quantity = amountToQuantity(amount, unit, log);
     if (!(quantity > 0)) return;
-    await onSave(log.id, { quantity, meal_type: editMeal });
+    // Closes the form immediately rather than waiting on the network --
+    // onSave's own optimistic update has already patched the row by the
+    // time this returns, so the display view shows the new values (or,
+    // on failure, the rolled-back ones) right away instead of leaving the
+    // edit form open and stale-looking for the round-trip.
     setEditingId(null);
+    await onSave(log.id, { quantity, meal_type: editMeal });
   }
 
   return (
@@ -168,15 +182,16 @@ export function DiaryMeal({
                 </span>
                 <button
                   type="button"
+                  disabled={isPending(log)}
                   onClick={() => startEdit(log)}
                   aria-label={`Edit ${log.food_name}`}
-                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container"
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container disabled:opacity-40"
                 >
                   <span className="material-symbols-outlined text-base" aria-hidden="true">edit</span>
                 </button>
                 <button
                   type="button"
-                  disabled={busyLogId === log.id}
+                  disabled={busyLogId === log.id || isPending(log)}
                   onClick={() => onDelete(log)}
                   aria-label={`Remove ${log.food_name}`}
                   className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-fat hover:bg-fat/10 disabled:opacity-60"

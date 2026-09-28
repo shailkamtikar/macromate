@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CreateFoodResponse,
   FoodItem,
+  FoodLog,
   MealType,
   createFood,
   fetchRecentFoods,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/api";
 import { FoodEntryFields } from "@/components/FoodEntryFields";
 import { friendlyMessage } from "@/lib/errors";
+import { nextTempId } from "@/lib/tempId";
 import {
   MEAL_LABELS,
   MEAL_TYPES,
@@ -28,8 +30,15 @@ interface FoodPickerProps {
    * meal's own "Add food" button can retarget it. */
   meal: MealType;
   onMealChange: (meal: MealType) => void;
-  /** Not called when `onSelect` is provided — see below. */
-  onLogged?: (log: import("@/lib/api").FoodLog) => void | Promise<void>;
+  /** Optimistic logging lifecycle -- none of these are called when
+   * `onSelect` is provided (see below). Fired synchronously, before the
+   * request, with a temporary FoodLog the caller can render immediately;
+   * `onLogSuccess`/`onLogError` then reconcile or roll that back once the
+   * real request settles. Lets the diary update the instant the user
+   * clicks, rather than waiting on the network. */
+  onLogStart?: (tempEntry: FoodLog) => void;
+  onLogSuccess?: (tempId: string, real: FoodLog) => void;
+  onLogError?: (tempId: string, err: unknown) => void;
   /** Refresh signal: bump to reload recent/frequent after the diary changes. */
   refreshKey?: number;
   /** Pre-fills and runs a search on mount — used when a caller already
@@ -56,10 +65,33 @@ function scaleNutrition(food: FoodItem, quantity: number) {
   };
 }
 
+function buildOptimisticLog(
+  tempId: string,
+  food: FoodItem,
+  mealType: MealType,
+  quantity: number,
+): FoodLog {
+  return {
+    id: tempId,
+    food_item_id: food.id,
+    food_name: food.name,
+    meal_type: mealType,
+    quantity,
+    ...scaleNutrition(food, quantity),
+    logged_at: new Date().toISOString(),
+    source: "database",
+    serving_description: food.serving_description,
+    serving_weight: food.serving_weight,
+    serving_weight_unit: food.serving_weight_unit,
+  };
+}
+
 export function FoodPicker({
   meal,
   onMealChange,
-  onLogged,
+  onLogStart,
+  onLogSuccess,
+  onLogError,
   refreshKey = 0,
   initialQuery,
   onSelect,
@@ -160,14 +192,17 @@ export function FoodPicker({
       return;
     }
     setBusyId(food.id);
+    const tempId = nextTempId();
+    onLogStart?.(buildOptimisticLog(tempId, food, meal, 1));
     try {
       const log = await logFood(food.id, meal, 1);
       setQuery("");
       setResults([]);
       setSelected(null);
-      await onLogged?.(log);
+      onLogSuccess?.(tempId, log);
     } catch (err) {
       setError(friendlyMessage(err, "food-log-save"));
+      onLogError?.(tempId, err);
     } finally {
       setBusyId(null);
     }
@@ -189,14 +224,17 @@ export function FoodPicker({
     }
     setError(null);
     setBusyId(selected.id);
+    const tempId = nextTempId();
+    onLogStart?.(buildOptimisticLog(tempId, selected, meal, quantity));
     try {
       const log = await logFood(selected.id, meal, quantity);
       setSelected(null);
       setQuery("");
       setResults([]);
-      await onLogged?.(log);
+      onLogSuccess?.(tempId, log);
     } catch (err) {
       setError(friendlyMessage(err, "food-log-save"));
+      onLogError?.(tempId, err);
     } finally {
       setBusyId(null);
     }

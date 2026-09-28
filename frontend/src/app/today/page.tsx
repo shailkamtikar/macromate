@@ -7,6 +7,7 @@ import {
   FoodLog,
   GlassSize,
   MealType,
+  SuggestedFood,
   SuggestionsResponse,
   WaterSummary,
   createGlassSize,
@@ -24,6 +25,7 @@ import {
 import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
 import { friendlyMessage } from "@/lib/errors";
 import { MEAL_TYPES, inferMealType } from "@/lib/servings";
+import { nextTempId } from "@/lib/tempId";
 import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { DiaryMeal } from "@/components/DiaryMeal";
 import { FoodPicker } from "@/components/FoodPicker";
@@ -56,7 +58,6 @@ export default function TodayPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logActionBusy, setLogActionBusy] = useState<string | null>(null);
-  const [waterBusy, setWaterBusy] = useState(false);
 
   // Starts at a fixed value so the server-rendered markup is deterministic,
   // then snaps to the meal that matches the current time of day once we're
@@ -65,6 +66,13 @@ export default function TodayPage() {
   const [diaryVersion, setDiaryVersion] = useState(0);
   const [achievements, setAchievements] = useState<Achievements | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  // Bumped synchronously by every optimistic mutation below. loadDay()'s
+  // Promise.all can take a while (fetchSuggestions in particular), and it
+  // only ever runs once on mount -- but "once on mount" can still resolve
+  // *after* a mutation the user fired off while it was in flight. Without
+  // this guard, that stale response would overwrite the fresher optimistic
+  // state with a pre-mutation snapshot.
+  const mutationVersion = useRef(0);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only time-of-day default, deliberately not computed during SSR
@@ -91,8 +99,14 @@ export default function TodayPage() {
     }
   }, [profile, session]);
 
-  async function reloadDay() {
+  // Full fetch of all four domains -- used only for the initial mount and
+  // the manual "Retry" link after a load failure. Every mutation below
+  // instead applies an optimistic update and/or a single targeted refetch
+  // of just the domain(s) it can actually affect, rather than reloading
+  // everything on every click (see the audit finding this replaces).
+  async function loadDay() {
     setLoadError(null);
+    const startVersion = mutationVersion.current;
     try {
       const [logs, waterSummary, glasses, suggestionsRes] = await Promise.all([
         fetchFoodLogs(todayIso()),
@@ -100,24 +114,47 @@ export default function TodayPage() {
         fetchGlassSizes(),
         fetchSuggestions(),
       ]);
+      // A mutation landed while this fetch was in flight -- its optimistic
+      // state is newer than this response, so applying it now would revert
+      // real, user-visible changes. Bail out; the mutation's own state
+      // update is already authoritative-enough (and, where relevant, has
+      // its own targeted refetch).
+      if (mutationVersion.current !== startVersion) return;
       setFoodLogs(logs);
       setWater(waterSummary);
       setGlassSizes(glasses);
       setSuggestions(suggestionsRes);
       setDiaryVersion((v) => v + 1);
     } catch (err) {
+      if (mutationVersion.current !== startVersion) return;
       setLoadError(friendlyMessage(err, "diary-load"));
+    }
+  }
+
+  // Suggestions depend on today's remaining calories/macros, so only a food
+  // mutation ever needs to refresh them -- never water or glass-size
+  // changes, which can't affect what's "left" to eat. Best-effort: a
+  // failure here shouldn't blow away an otherwise-successful food action.
+  async function refreshSuggestions() {
+    try {
+      setSuggestions(await fetchSuggestions());
+    } catch {
+      // Keep showing the previous suggestions rather than erroring the
+      // whole page over a non-critical, supplementary fetch.
     }
   }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount, standard pattern
-    if (session && profile) reloadDay();
+    if (session && profile) loadDay();
   }, [session, profile]);
 
   useEffect(() => {
     // Lightweight, best-effort: the streak chip is a nice-to-have, so a
-    // failure here should never surface as a page error.
+    // failure here should never surface as a page error. Achievements
+    // (streak, calorie/macro goal hits) only depend on food logs, so this
+    // is keyed on diaryVersion, which now only bumps for food mutations --
+    // not water or glass-size changes, which can't affect it.
     if (!session) return;
     fetchAchievements()
       .then(setAchievements)
@@ -166,31 +203,75 @@ export default function TodayPage() {
   );
   const waterGoal = profile.water_goal_ml ?? 2500;
   const waterTotal = water?.total_ml ?? 0;
+  // Distinguishes "genuinely 0 ml logged" from "hasn't loaded yet" --
+  // waterTotal alone can't, since both render as 0. A click in that brief
+  // initial window would otherwise optimistically no-op (setWater's
+  // functional update is a no-op while `water` is still null) with no
+  // visible feedback and no request correction until the next mutation.
+  const waterLoaded = water !== null;
 
+  // Water total is a plain sum, so the optimistic delta *is* the correct
+  // total (not a guess to be corrected) -- logWater's response doesn't
+  // carry an aggregate to reconcile against anyway. Rollback restores the
+  // exact delta rather than an older snapshot, so it can't clobber another
+  // still-in-flight water mutation.
   async function handleQuickWater(volumeMl: number) {
     setActionError(null);
-    setWaterBusy(true);
+    mutationVersion.current += 1;
+    setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml + volumeMl } : prev));
     try {
       await logWater(volumeMl);
-      await reloadDay();
     } catch (err) {
+      setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml - volumeMl } : prev));
       setActionError(friendlyMessage(err, "water-log"));
-    } finally {
-      setWaterBusy(false);
     }
   }
 
   async function handleRemoveWater(volumeMl: number) {
     setActionError(null);
-    setWaterBusy(true);
+    mutationVersion.current += 1;
+    setWater((prev) => (prev ? { ...prev, total_ml: Math.max(0, prev.total_ml - volumeMl) } : prev));
     try {
-      await removeWater(volumeMl);
-      await reloadDay();
+      // Unlike logWater, removeWater's response IS the server's own
+      // recomputed summary -- use it as the authoritative correction
+      // rather than trusting the optimistic subtraction indefinitely.
+      const summary = await removeWater(volumeMl);
+      setWater(summary);
     } catch (err) {
+      setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml + volumeMl } : prev));
       setActionError(friendlyMessage(err, "water-log"));
-    } finally {
-      setWaterBusy(false);
     }
+  }
+
+  async function handleAddGlassSize(label: string, volumeMl: number) {
+    setActionError(null);
+    mutationVersion.current += 1;
+    const tempId = nextTempId();
+    setGlassSizes((prev) => [...(prev ?? []), { id: tempId, label, volume_ml: volumeMl }]);
+    try {
+      const created = await createGlassSize(label, volumeMl);
+      setGlassSizes((prev) => (prev ?? []).map((g) => (g.id === tempId ? created : g)));
+    } catch (err) {
+      setGlassSizes((prev) => (prev ?? []).filter((g) => g.id !== tempId));
+      setActionError(friendlyMessage(err, "glass-size"));
+    }
+  }
+
+  function handleFoodLogStart(entry: FoodLog) {
+    setActionError(null);
+    mutationVersion.current += 1;
+    setFoodLogs((prev) => [...(prev ?? []), entry]);
+  }
+
+  function handleFoodLogSuccess(tempId: string, real: FoodLog) {
+    setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === tempId ? real : l)));
+    setDiaryVersion((v) => v + 1);
+    refreshSuggestions();
+  }
+
+  function handleFoodLogError(tempId: string, err: unknown) {
+    setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== tempId));
+    setActionError(friendlyMessage(err, "food-log-save"));
   }
 
   async function handleSaveEntry(
@@ -198,11 +279,36 @@ export default function TodayPage() {
     changes: { quantity?: number; meal_type?: MealType },
   ) {
     setActionError(null);
+    mutationVersion.current += 1;
     setLogActionBusy(logId);
+    let previous: FoodLog | undefined;
+    setFoodLogs((prev) =>
+      (prev ?? []).map((l) => {
+        if (l.id !== logId) return l;
+        previous = l;
+        // A quantity change scales the logged nutrition proportionally --
+        // the exact same arithmetic the server applies -- so the
+        // optimistic row already shows the real post-edit numbers, not a
+        // placeholder, while the request is in flight.
+        const ratio =
+          changes.quantity !== undefined && l.quantity > 0 ? changes.quantity / l.quantity : 1;
+        return {
+          ...l,
+          quantity: changes.quantity ?? l.quantity,
+          meal_type: changes.meal_type ?? l.meal_type,
+          calories: l.calories * ratio,
+          protein_g: l.protein_g * ratio,
+          carbs_g: l.carbs_g * ratio,
+          fat_g: l.fat_g * ratio,
+        };
+      }),
+    );
     try {
-      await updateFoodLog(logId, changes);
-      await reloadDay();
+      const updated = await updateFoodLog(logId, changes);
+      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === logId ? updated : l)));
+      if (changes.quantity !== undefined) await refreshSuggestions();
     } catch (err) {
+      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === logId && previous ? previous : l)));
       setActionError(friendlyMessage(err, "food-log-update"));
     } finally {
       setLogActionBusy(null);
@@ -212,23 +318,50 @@ export default function TodayPage() {
   async function handleDeleteEntry(log: FoodLog) {
     if (!window.confirm(`Remove ${log.food_name} from today's diary?`)) return;
     setActionError(null);
+    mutationVersion.current += 1;
     setLogActionBusy(log.id);
+    setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== log.id));
     try {
       await deleteFoodLog(log.id);
-      await reloadDay();
+      setDiaryVersion((v) => v + 1);
+      await refreshSuggestions();
     } catch (err) {
+      setFoodLogs((prev) => (prev ? [...prev, log] : prev));
       setActionError(friendlyMessage(err, "food-log-delete"));
     } finally {
       setLogActionBusy(null);
     }
   }
 
-  async function handleSuggestionAdd(foodId: string) {
+  async function handleSuggestionAdd(food: SuggestedFood) {
     setActionError(null);
+    mutationVersion.current += 1;
+    const tempId = nextTempId();
+    const mealType = inferMealType();
+    setFoodLogs((prev) => [
+      ...(prev ?? []),
+      {
+        id: tempId,
+        food_item_id: food.id,
+        food_name: food.name,
+        meal_type: mealType,
+        quantity: 1,
+        calories: food.calories,
+        protein_g: food.protein_g,
+        carbs_g: food.carbs_g,
+        fat_g: food.fat_g,
+        logged_at: new Date().toISOString(),
+        source: "database",
+        serving_description: food.serving_description,
+      },
+    ]);
     try {
-      await logFood(foodId, inferMealType(), 1);
-      await reloadDay();
+      const log = await logFood(food.id, mealType, 1);
+      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === tempId ? log : l)));
+      setDiaryVersion((v) => v + 1);
+      await refreshSuggestions();
     } catch (err) {
+      setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== tempId));
       setActionError(friendlyMessage(err, "food-log-save"));
     }
   }
@@ -260,7 +393,7 @@ export default function TodayPage() {
         {loadError && (
           <p className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat">
             {loadError}{" "}
-            <button onClick={reloadDay} className="font-semibold underline">
+            <button onClick={loadDay} className="font-semibold underline">
               Retry
             </button>
           </p>
@@ -394,7 +527,9 @@ export default function TodayPage() {
               <FoodPicker
                 meal={pickerMeal}
                 onMealChange={setPickerMeal}
-                onLogged={reloadDay}
+                onLogStart={handleFoodLogStart}
+                onLogSuccess={handleFoodLogSuccess}
+                onLogError={handleFoodLogError}
                 refreshKey={diaryVersion}
               />
             </div>
@@ -405,8 +540,8 @@ export default function TodayPage() {
               glassSizes={glassSizes ?? []}
               onQuickLog={handleQuickWater}
               onRemove={handleRemoveWater}
-              onGlassAdded={reloadDay}
-              busy={waterBusy}
+              onAddGlassSize={handleAddGlassSize}
+              disabled={!waterLoaded}
             />
 
             {suggestions && (
@@ -448,7 +583,7 @@ export default function TodayPage() {
                           </p>
                         </div>
                         <button
-                          onClick={() => handleSuggestionAdd(food.id)}
+                          onClick={() => handleSuggestionAdd(food)}
                           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
                           aria-label={`Add ${food.name}`}
                         >
@@ -473,27 +608,30 @@ function WaterCard({
   glassSizes,
   onQuickLog,
   onRemove,
-  onGlassAdded,
-  busy,
+  onAddGlassSize,
+  disabled,
 }: {
   totalMl: number;
   goalMl: number;
   glassSizes: GlassSize[];
   onQuickLog: (ml: number) => void;
   onRemove: (ml: number) => void;
-  onGlassAdded: () => void;
-  busy: boolean;
+  onAddGlassSize: (label: string, volumeMl: number) => void;
+  /** True only until the initial water fetch resolves -- NOT held during a
+   * mutation's own round-trip (those are optimistic and stay interactive).
+   * Without this, a click in that brief initial window would silently
+   * no-op (see the comment on `waterLoaded` in the parent). */
+  disabled?: boolean;
 }) {
   const [addingSize, setAddingSize] = useState(false);
   const [label, setLabel] = useState("");
   const [volume, setVolume] = useState(250);
 
-  async function handleAddSize(e: React.FormEvent) {
+  function handleAddSize(e: React.FormEvent) {
     e.preventDefault();
-    await createGlassSize(label || `${volume}ml`, volume);
+    onAddGlassSize(label || `${volume}ml`, volume);
     setAddingSize(false);
     setLabel("");
-    onGlassAdded();
   }
 
   const quickOptions = glassSizes.length > 0 ? glassSizes : [
@@ -534,7 +672,7 @@ function WaterCard({
           goalMl={goalMl}
           onAdd={() => onQuickLog(unitMl)}
           onRemove={totalMl > 0 ? () => onRemove(unitMl) : undefined}
-          disabled={busy}
+          disabled={disabled}
         />
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -542,7 +680,7 @@ function WaterCard({
           <button
             key={g.id}
             onClick={() => onQuickLog(g.volume_ml)}
-            disabled={busy}
+            disabled={disabled}
             className="rounded-[var(--radius-control)] bg-surface-container-low px-3 py-1.5 text-xs font-semibold text-water disabled:opacity-50"
           >
             +{g.volume_ml}ml

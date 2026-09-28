@@ -140,6 +140,9 @@ test("diary entry can change quantity and move between meals, updating meal and 
   await entry.getByRole("button", { name: `Edit ${foodName}` }).click();
   await lunch.getByLabel("Quantity").fill("3");
   await lunch.getByLabel("Meal").selectOption("dinner");
+  const saveResponse = page.waitForResponse(
+    (res) => res.request().method() === "PATCH" && res.url().includes("/food-logs/"),
+  );
   await lunch.getByRole("button", { name: `Save ${foodName}` }).click();
 
   const dinnerEntry = page.getByTestId("meal-dinner").locator("li", { hasText: foodName });
@@ -150,6 +153,11 @@ test("diary entry can change quantity and move between meals, updating meal and 
   await expect(page.getByTestId("meal-total-lunch")).toContainText("0");
   await expect(page.getByTestId("meal-total-dinner")).toContainText("600");
   await expect(consumedCalories).toContainText("600");
+
+  // The edit renders optimistically, ahead of the network round-trip -- wait
+  // for the real PATCH to actually land before reloading, since a reload
+  // aborts any request still in flight and would otherwise race the save.
+  await saveResponse;
 
   // The move persisted, not just re-rendered.
   await page.reload();
