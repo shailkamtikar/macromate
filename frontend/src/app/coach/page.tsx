@@ -5,6 +5,10 @@ import { CoachMessage, fetchCoachHistory, sendCoachMessage } from "@/lib/api";
 import { friendlyMessage } from "@/lib/errors";
 import { useSession } from "@/lib/useSession";
 
+// The textarea grows with content up to this height, then scrolls
+// internally instead of pushing the rest of the page around.
+const MAX_INPUT_HEIGHT_PX = 160;
+
 export default function CoachPage() {
   const { session, loading: sessionLoading } = useSession();
   const [messages, setMessages] = useState<CoachMessage[] | null>(null);
@@ -12,6 +16,18 @@ export default function CoachPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    // Recompute from scratch on every change so shrinking (e.g. after
+    // deleting text, or after sending clears the field) works too, not
+    // just growth.
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
+  }, [input]);
 
   useEffect(() => {
     if (!session) return;
@@ -55,6 +71,17 @@ export default function CoachPage() {
       setError(friendlyMessage(err, "coach-message"));
     } finally {
       setSending(false);
+      // Keeps the caret in the input after sending, matching a normal
+      // chat input's feel instead of leaving focus stranded on the
+      // (now-disabled) Send button.
+      textareaRef.current?.focus();
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      formRef.current?.requestSubmit();
     }
   }
 
@@ -101,18 +128,27 @@ export default function CoachPage() {
               </div>
             ))
           )}
-          {sending && <p className="text-xs text-on-surface-variant">Coach is thinking…</p>}
+          {sending && (
+            <p role="status" aria-live="polite" className="text-xs text-on-surface-variant">
+              Coach is thinking…
+            </p>
+          )}
           <div ref={bottomRef} />
         </div>
 
         {error && <p className="mb-2 text-sm text-fat">{error}</p>}
 
-        <form onSubmit={handleSend} className="flex gap-2">
-          <input
+        <form ref={formRef} onSubmit={handleSend} className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Ask the coach…"
-            className="input flex-1"
+            aria-label="Message Coach"
+            rows={1}
+            className="input flex-1 resize-none overflow-y-auto py-2 leading-snug"
+            style={{ maxHeight: MAX_INPUT_HEIGHT_PX }}
           />
           <button
             type="submit"

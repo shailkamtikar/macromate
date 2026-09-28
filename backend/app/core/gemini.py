@@ -32,14 +32,32 @@ class GeminiUnavailable(GeminiError):
     deterministic response), never silently fabricate an AI answer."""
 
 
+def _build_contents(prompt: str, history: list[dict] | None) -> list[dict]:
+    """Turns a bounded list of prior conversation turns (each
+    `{"role": "user"|"assistant", "content": str}`, oldest first) plus the
+    new prompt into Gemini's multi-turn `contents` shape. Gemini only knows
+    "user"/"model" roles, so "assistant" is mapped to "model" here."""
+    contents = []
+    for turn in history or []:
+        role = "model" if turn["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    return contents
+
+
 def _call_model(
-    model: str, prompt: str, *, system_instruction: str | None, timeout: float
+    model: str,
+    prompt: str,
+    *,
+    system_instruction: str | None,
+    timeout: float,
+    history: list[dict] | None = None,
 ) -> str:
     settings = get_settings()
     if not settings.gemini_api_key:
         raise GeminiUnavailable("GEMINI_API_KEY is not configured")
 
-    payload: dict = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+    payload: dict = {"contents": _build_contents(prompt, history)}
     if system_instruction:
         payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
@@ -84,17 +102,40 @@ def _call_model(
     return text
 
 
+# The fallback only runs after the primary has already failed/timed out --
+# giving it the same generous timeout as the primary would let a hung
+# primary plus a hung fallback add up to ~2x `timeout` worst-case latency.
+# A shorter fallback timeout keeps worst-case latency close to a single
+# `timeout` window while still giving the (already lighter-weight) fallback
+# model a fair chance to respond.
+DEFAULT_FALLBACK_TIMEOUT = 8.0
+
+
 def generate_text(
-    prompt: str, *, system_instruction: str | None = None, timeout: float = 20.0
+    prompt: str,
+    *,
+    system_instruction: str | None = None,
+    history: list[dict] | None = None,
+    timeout: float = 20.0,
+    fallback_timeout: float | None = None,
 ) -> str:
     """Calls the primary model, automatically falling back to the
-    lightweight model on any error (rate limit, timeout, outage)."""
+    lightweight model on any error (rate limit, timeout, outage).
+
+    `history` is an optional bounded list of prior conversation turns
+    (oldest first) included ahead of `prompt` for multi-turn context -- see
+    `_build_contents`. `fallback_timeout` defaults to a shorter window than
+    `timeout` (see DEFAULT_FALLBACK_TIMEOUT) so a slow/hung primary doesn't
+    double the worst-case wait."""
     settings = get_settings()
+    if fallback_timeout is None:
+        fallback_timeout = min(timeout, DEFAULT_FALLBACK_TIMEOUT)
     try:
         return _call_model(
             settings.gemini_primary_model,
             prompt,
             system_instruction=system_instruction,
+            history=history,
             timeout=timeout,
         )
     except GeminiError as primary_error:
@@ -104,7 +145,8 @@ def generate_text(
                 settings.gemini_fallback_model,
                 prompt,
                 system_instruction=system_instruction,
-                timeout=timeout,
+                history=history,
+                timeout=fallback_timeout,
             )
         except GeminiError as fallback_error:
             raise GeminiUnavailable(

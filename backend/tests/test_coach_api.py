@@ -165,10 +165,14 @@ def onboarded_user_full():
 
 
 def _stub_gemini_intent(monkeypatch, payload: dict):
-    calls = {"count": 0}
+    calls = {"count": 0, "history": None, "prompt": None}
 
-    def fake_generate_text(prompt, *, system_instruction=None, timeout=20):
+    def fake_generate_text(
+        prompt, *, system_instruction=None, history=None, timeout=20, fallback_timeout=None
+    ):
         calls["count"] += 1
+        calls["history"] = history
+        calls["prompt"] = prompt
         return json.dumps(payload)
 
     monkeypatch.setattr("app.routers.coach.generate_text", fake_generate_text)
@@ -556,6 +560,206 @@ def test_coach_add_food_reply_does_not_expose_internal_ids(
     import re
 
     assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", content)
+
+
+# ---------------------------------------------------------------------------
+# Conversational memory: bounded history, chronological order, user
+# isolation, and that deterministic answers stay deterministic regardless.
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_receives_prior_turns_in_chronological_order(client, onboarded_user, monkeypatch):
+    calls = _stub_gemini_intent(
+        monkeypatch, {"in_scope": True, "intent": "read", "reply": "Try grilled chicken and rice."}
+    )
+    first = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "What should I eat for dinner tonight?"},
+    )
+    assert first.status_code == 200
+    # First turn has no prior history yet.
+    assert calls["history"] == []
+
+    second = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "And what about a good breakfast tomorrow?"},
+    )
+    assert second.status_code == 200
+
+    history = calls["history"]
+    assert history is not None
+    assert [h["role"] for h in history] == ["user", "assistant"]
+    assert history[0]["content"] == "What should I eat for dinner tonight?"
+    assert history[1]["content"] == "Try grilled chicken and rice."
+    # The current message is appended separately by generate_text -- it
+    # must never also be duplicated inside the history list.
+    assert all(h["content"] != "And what about a good breakfast tomorrow?" for h in history)
+
+
+def test_a_fast_path_turn_is_included_in_history_for_the_next_gemini_turn(
+    client, onboarded_user, monkeypatch
+):
+    """Regression test for the original bug: a deterministic fast-path
+    answer must still count as part of the conversation, so a natural
+    follow-up referencing it isn't answered with zero context."""
+    fast = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "How much protein do I have left?"},
+    )
+    assert fast.status_code == 200
+    assert "160g" in fast.json()["content"]
+
+    calls = _stub_gemini_intent(
+        monkeypatch, {"in_scope": True, "intent": "read", "reply": "Try a can of tuna or a whey shake."}
+    )
+    followup = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "Can you suggest something to help close that gap?"},
+    )
+    assert followup.status_code == 200
+
+    history = calls["history"]
+    assert history[0]["role"] == "user"
+    assert "protein" in history[0]["content"].lower()
+    assert history[1]["role"] == "assistant"
+    assert "160g" in history[1]["content"]
+
+
+def test_gemini_history_is_bounded_and_drops_the_oldest_turns(client, onboarded_user, monkeypatch):
+    from app.routers.coach import COACH_HISTORY_TURN_LIMIT
+
+    calls = _stub_gemini_intent(monkeypatch, {"in_scope": True, "intent": "read", "reply": "ok"})
+
+    # Enough Gemini-backed turns to exceed the bound (each stores a
+    # user+assistant row, so this alone produces more rows than the limit).
+    for i in range(COACH_HISTORY_TURN_LIMIT):
+        resp = client.post(
+            "/api/ai/coach/message",
+            headers=onboarded_user,
+            json={"message": f"Tell me an unrelated fitness fact number {i}, please advise."},
+        )
+        assert resp.status_code == 200, resp.text
+
+    history = calls["history"]
+    assert len(history) <= COACH_HISTORY_TURN_LIMIT
+    # The very first turn must have been dropped -- proves history is
+    # genuinely bounded, not silently growing without limit.
+    assert not any("fact number 0," in h["content"] for h in history)
+
+
+def test_coach_history_never_leaks_between_users(client, onboarded_user_full, monkeypatch):
+    user_id, headers = onboarded_user_full
+    other_id, other_headers = _create_onboarded_user()
+    try:
+        _stub_gemini_intent(
+            monkeypatch, {"in_scope": True, "intent": "read", "reply": "Reply for user A."}
+        )
+        resp_a = client.post(
+            "/api/ai/coach/message",
+            headers=headers,
+            json={"message": "This message belongs only to user A."},
+        )
+        assert resp_a.status_code == 200
+
+        calls_b = _stub_gemini_intent(
+            monkeypatch, {"in_scope": True, "intent": "read", "reply": "Reply for user B."}
+        )
+        resp_b = client.post(
+            "/api/ai/coach/message",
+            headers=other_headers,
+            json={"message": "This is user B's very first message."},
+        )
+        assert resp_b.status_code == 200
+        # User B's Gemini call must never see user A's conversation.
+        assert calls_b["history"] == []
+    finally:
+        httpx.delete(
+            f"{settings.supabase_url}/auth/v1/admin/users/{other_id}",
+            headers={
+                "apikey": settings.supabase_service_role_key,
+                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+            },
+            timeout=15,
+        )
+
+
+def test_fast_path_still_answers_deterministically_after_a_gemini_turn(
+    client, onboarded_user, monkeypatch
+):
+    """Deterministic numeric answers must stay authoritative regardless of
+    conversation history -- Gemini is never responsible for the number."""
+    calls = _stub_gemini_intent(
+        monkeypatch, {"in_scope": True, "intent": "read", "reply": "Some open-ended reply."}
+    )
+    client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "What should I eat tonight?"},
+    )
+    assert calls["count"] == 1
+
+    resp = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "How much protein do I have left?"},
+    )
+    assert resp.status_code == 200
+    assert "160g" in resp.json()["content"]
+    # The fast path must answer without an extra Gemini call.
+    assert calls["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Performance ordering: the fast path must never pay for the weekly-summary
+# reads that only the Gemini path actually needs.
+# ---------------------------------------------------------------------------
+
+
+def test_fast_path_never_computes_the_weekly_summary(client, onboarded_user, monkeypatch):
+    calls = {"n": 0}
+    from app.routers import coach as coach_module
+
+    original = coach_module._weekly_summary
+
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("app.routers.coach._weekly_summary", spy)
+
+    resp = client.post(
+        "/api/ai/coach/message", headers=onboarded_user, json={"message": "What's my BMI?"}
+    )
+    assert resp.status_code == 200
+    assert calls["n"] == 0
+
+
+def test_gemini_path_still_computes_the_weekly_summary(client, onboarded_user, monkeypatch):
+    """Confirms the fast-path optimization didn't silently break the
+    Gemini path's access to weekly context."""
+    calls = {"n": 0}
+    from app.routers import coach as coach_module
+
+    original = coach_module._weekly_summary
+
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("app.routers.coach._weekly_summary", spy)
+    _stub_gemini_intent(monkeypatch, {"in_scope": True, "intent": "read", "reply": "ok"})
+
+    resp = client.post(
+        "/api/ai/coach/message",
+        headers=onboarded_user,
+        json={"message": "What should I eat for dinner tonight?"},
+    )
+    assert resp.status_code == 200
+    assert calls["n"] == 1
 
 
 def test_coach_action_only_affects_the_authenticated_users_own_data(

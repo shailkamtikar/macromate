@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException
@@ -14,6 +15,15 @@ from app.domain.progress import build_weekly_report, week_bounds
 from app.domain.timeutil import day_bounds_utc, infer_meal_type, local_today
 
 router = APIRouter(prefix="/api/ai/coach", tags=["ai"])
+
+# Bounded conversational memory: enough recent turns for natural follow-ups
+# ("what about carbs?") without ever sending a user's entire lifetime chat
+# history to Gemini on every message.
+COACH_HISTORY_TURN_LIMIT = 12
+# A hung/slow fallback call should still return well within a normal
+# request budget -- shorter than the primary's timeout (see
+# app/core/gemini.py's DEFAULT_FALLBACK_TIMEOUT for the rationale).
+COACH_FALLBACK_TIMEOUT = 8.0
 
 # A fixed, backend-owned refusal -- never Gemini's own words for this case,
 # so an out-of-scope request can never accidentally be answered anyway
@@ -39,7 +49,15 @@ class CoachMessageOut(BaseModel):
     action: str | None = None
 
 
-def _load_context(db: SupabaseAdmin, user_id: str):
+def _load_context(db: SupabaseAdmin, user_id: str, *, include_weekly_summary: bool = True):
+    """Builds the deterministic MacroMate facts Coach ever states.
+
+    `include_weekly_summary=False` skips `_weekly_summary`'s extra DB reads
+    (two weekly food-log scans plus a weekly weight-log scan) -- callers
+    that only need this to check `deterministic_fast_path` (which never
+    reads `ctx.weekly_summary`) should pass this, since a fast-path answer
+    doesn't need it and those reads would be wasted. The Gemini-backed path
+    still gets the full summary via `_add_weekly_summary` below."""
     profiles = db.select("profiles", {"id": f"eq.{user_id}", "select": "*"})
     if not profiles:
         raise HTTPException(status_code=404, detail="Complete onboarding first")
@@ -89,7 +107,11 @@ def _load_context(db: SupabaseAdmin, user_id: str):
     if activity_rows and activity_rows[0].get("steps") is not None:
         activity_steps_today = activity_rows[0]["steps"]
 
-    weekly_summary = _weekly_summary(db, user_id, today, tz_name, profile["target_calories"])
+    weekly_summary = (
+        _weekly_summary(db, user_id, today, tz_name, profile["target_calories"])
+        if include_weekly_summary
+        else None
+    )
 
     target = MacroTargets(
         calories=profile["target_calories"],
@@ -166,6 +188,16 @@ def _weekly_summary(db, user_id, today, tz_name, target_calories) -> str | None:
         return None
 
 
+def _add_weekly_summary(db: SupabaseAdmin, user_id: str, profile: dict, ctx):
+    """Fills in `ctx.weekly_summary` for a context that was built with
+    `include_weekly_summary=False` -- called only once a message is known
+    to need the Gemini path, so the fast path never pays for these reads."""
+    tz_name = profile.get("timezone") or "UTC"
+    today = local_today(tz_name)
+    summary = _weekly_summary(db, user_id, today, tz_name, profile["target_calories"])
+    return replace(ctx, weekly_summary=summary)
+
+
 @router.get("/history", response_model=list[CoachMessageOut])
 def get_history(current_user: CurrentUserDep) -> list[CoachMessageOut]:
     db = SupabaseAdmin()
@@ -174,6 +206,19 @@ def get_history(current_user: CurrentUserDep) -> list[CoachMessageOut]:
         {"user_id": f"eq.{current_user.user_id}", "order": "created_at.asc", "limit": "100"},
     )
     return [CoachMessageOut(role=r["role"], content=r["content"], created_at=r["created_at"]) for r in rows]
+
+
+def _load_recent_history(db: SupabaseAdmin, user_id: str, limit: int = COACH_HISTORY_TURN_LIMIT) -> list[dict]:
+    """The last `limit` turns of this user's own conversation, oldest
+    first -- bounded so a long-running conversation never grows the
+    Gemini prompt indefinitely, and scoped strictly to `user_id` so one
+    user's history can never leak into another user's Coach context."""
+    rows = db.select(
+        "chat_history",
+        {"user_id": f"eq.{user_id}", "order": "created_at.desc", "limit": str(limit)},
+    )
+    rows.reverse()
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
 def _store_reply(
@@ -191,24 +236,40 @@ def _store_reply(
 @router.post("/message", response_model=CoachMessageOut)
 def send_message(payload: CoachMessageRequest, current_user: CurrentUserDep) -> CoachMessageOut:
     db = SupabaseAdmin()
+    user_id = current_user.user_id
+
+    # Fetched before inserting the new user message below, so it never
+    # includes that message twice -- `history` is prior turns only, and
+    # `payload.message` is appended separately as the final turn.
+    history = _load_recent_history(db, user_id)
 
     db.insert(
         "chat_history",
-        {"user_id": current_user.user_id, "role": "user", "content": payload.message},
+        {"user_id": user_id, "role": "user", "content": payload.message},
     )
 
-    profile, ctx = _load_context(db, current_user.user_id)
+    # Cheap context only (profile + today's numbers) -- enough to answer
+    # deterministically or to check whether deterministic_fast_path even
+    # applies, without yet paying for the weekly-summary reads that only
+    # the Gemini path actually uses.
+    profile, ctx = _load_context(db, user_id, include_weekly_summary=False)
 
     fast_answer = deterministic_fast_path(payload.message, ctx)
     if fast_answer is not None:
-        return _store_reply(db, current_user.user_id, fast_answer, "deterministic", action=None)
+        return _store_reply(db, user_id, fast_answer, "deterministic", action=None)
+
+    ctx = _add_weekly_summary(db, user_id, profile, ctx)
 
     system_instruction = COACH_INTENT_SYSTEM_INSTRUCTION.format(
         context=context_to_prompt_text(ctx)
     )
     try:
         raw_response = generate_text(
-            payload.message, system_instruction=system_instruction, timeout=20
+            payload.message,
+            system_instruction=system_instruction,
+            history=history,
+            timeout=20,
+            fallback_timeout=COACH_FALLBACK_TIMEOUT,
         )
     except GeminiUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"Coach is temporarily unavailable: {exc}")
