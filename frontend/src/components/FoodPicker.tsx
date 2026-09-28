@@ -11,6 +11,7 @@ import {
   searchFoods,
 } from "@/lib/api";
 import { FoodEntryFields } from "@/components/FoodEntryFields";
+import { friendlyMessage } from "@/lib/errors";
 import {
   MEAL_LABELS,
   MEAL_TYPES,
@@ -132,7 +133,7 @@ export function FoodPicker({
       try {
         setResults(await searchFoods(value));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Search failed.");
+        setError(friendlyMessage(err, "food-search"));
       } finally {
         setSearching(false);
       }
@@ -166,7 +167,7 @@ export function FoodPicker({
       setSelected(null);
       await onLogged?.(log);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't log that food.");
+      setError(friendlyMessage(err, "food-log-save"));
     } finally {
       setBusyId(null);
     }
@@ -195,7 +196,7 @@ export function FoodPicker({
       setResults([]);
       await onLogged?.(log);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't log that food.");
+      setError(friendlyMessage(err, "food-log-save"));
     } finally {
       setBusyId(null);
     }
@@ -247,7 +248,7 @@ export function FoodPicker({
         setDuplicates(res.possible_duplicates);
       }
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Couldn't create that food.");
+      setCreateError(friendlyMessage(err, "food-create"));
     } finally {
       setCreating(false);
     }

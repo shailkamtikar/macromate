@@ -15,6 +15,7 @@ interface NumericFieldProps {
   max?: number;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
   "aria-label"?: string;
 }
 
@@ -38,6 +39,7 @@ export function NumericField({
   max,
   placeholder,
   className,
+  disabled,
   "aria-label": ariaLabel,
 }: NumericFieldProps) {
   const [text, setText] = useState(String(value));
@@ -78,6 +80,7 @@ export function NumericField({
       value={text}
       placeholder={placeholder}
       className={className}
+      disabled={disabled}
       onFocus={() => {
         focused.current = true;
       }}

@@ -6,6 +6,7 @@ import {
   fetchNotificationSettings,
   updateNotificationSettings,
 } from "@/lib/api";
+import { friendlyMessage } from "@/lib/errors";
 
 type PermissionState = "default" | "granted" | "denied" | "unsupported";
 
@@ -34,7 +35,7 @@ export function NotificationsManager() {
   useEffect(() => {
     fetchNotificationSettings()
       .then(setNotif)
-      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load preferences."));
+      .catch((err) => setError(friendlyMessage(err, "notifications-load")));
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reads a client-only browser API, not reachable during render
     setPermission(readNotificationPermission());
   }, []);
@@ -47,7 +48,7 @@ export function NotificationsManager() {
       await updateNotificationSettings(notif);
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save preferences.");
+      setError(friendlyMessage(err, "notifications-save"));
     }
   }
 

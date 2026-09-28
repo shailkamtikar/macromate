@@ -22,6 +22,7 @@ import {
   updateFoodLog,
 } from "@/lib/api";
 import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
+import { friendlyMessage } from "@/lib/errors";
 import { MEAL_TYPES, inferMealType } from "@/lib/servings";
 import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { DiaryMeal } from "@/components/DiaryMeal";
@@ -105,7 +106,7 @@ export default function TodayPage() {
       setSuggestions(suggestionsRes);
       setDiaryVersion((v) => v + 1);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load today's data.");
+      setLoadError(friendlyMessage(err, "diary-load"));
     }
   }
 
@@ -173,7 +174,7 @@ export default function TodayPage() {
       await logWater(volumeMl);
       await reloadDay();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't log water.");
+      setActionError(friendlyMessage(err, "water-log"));
     } finally {
       setWaterBusy(false);
     }
@@ -186,7 +187,7 @@ export default function TodayPage() {
       await removeWater(volumeMl);
       await reloadDay();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't undo that.");
+      setActionError(friendlyMessage(err, "water-log"));
     } finally {
       setWaterBusy(false);
     }
@@ -202,7 +203,7 @@ export default function TodayPage() {
       await updateFoodLog(logId, changes);
       await reloadDay();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't update that entry.");
+      setActionError(friendlyMessage(err, "food-log-update"));
     } finally {
       setLogActionBusy(null);
     }
@@ -216,7 +217,7 @@ export default function TodayPage() {
       await deleteFoodLog(log.id);
       await reloadDay();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't remove that entry.");
+      setActionError(friendlyMessage(err, "food-log-delete"));
     } finally {
       setLogActionBusy(null);
     }
@@ -228,7 +229,7 @@ export default function TodayPage() {
       await logFood(foodId, inferMealType(), 1);
       await reloadDay();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't log that food.");
+      setActionError(friendlyMessage(err, "food-log-save"));
     }
   }
 

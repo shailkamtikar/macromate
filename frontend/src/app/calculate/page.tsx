@@ -4,7 +4,6 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AiEstimateInput,
-  ApiError,
   CalculateFoodsResponse,
   FoodCandidate,
   FoodItem,
@@ -18,6 +17,7 @@ import {
   logFood,
 } from "@/lib/api";
 import { useSession } from "@/lib/useSession";
+import { friendlyMessage } from "@/lib/errors";
 import { FoodPicker } from "@/components/FoodPicker";
 import { DietPlanGenerator } from "@/components/DietPlanGenerator";
 import {
@@ -243,11 +243,7 @@ function CalculatePageInner() {
       setRows(res.items.map((item, i) => rowFromParsedItem(item, i)));
       setHasResult(true);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `Couldn't work out what you ate: ${err.message}`
-          : "Something went wrong.",
-      );
+      setError(friendlyMessage(err, "ai-calculate"));
     } finally {
       setParsing(false);
     }
@@ -414,14 +410,11 @@ function CalculatePageInner() {
       setRows((prev) =>
         prev.map((r) => (succeeded.includes(r.key) ? { ...r, status: "logged" as const } : r)),
       );
+      const friendly = friendlyMessage(err, "food-log-save");
       setError(
         succeeded.length > 0
-          ? `Added ${succeeded.length} of ${confirmable.length} foods, then hit an error: ${
-              err instanceof Error ? err.message : "unknown error"
-            }. The rest are still below — try confirming again.`
-          : err instanceof Error
-            ? `Couldn't save: ${err.message}`
-            : "Couldn't save those foods.",
+          ? `Added ${succeeded.length} of ${confirmable.length} foods, then ran into a problem. The rest are still below — try confirming again.`
+          : friendly,
       );
     } finally {
       setConfirming(false);

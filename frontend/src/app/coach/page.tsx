@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ApiError, CoachMessage, fetchCoachHistory, sendCoachMessage } from "@/lib/api";
+import { CoachMessage, fetchCoachHistory, sendCoachMessage } from "@/lib/api";
+import { friendlyMessage } from "@/lib/errors";
 import { useSession } from "@/lib/useSession";
 
 export default function CoachPage() {
@@ -16,7 +17,7 @@ export default function CoachPage() {
     if (!session) return;
     fetchCoachHistory()
       .then(setMessages)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load history."));
+      .catch((err) => setError(friendlyMessage(err, "coach-history")));
   }, [session]);
 
   useEffect(() => {
@@ -51,11 +52,7 @@ export default function CoachPage() {
       const reply = await sendCoachMessage(userMessage.content);
       setMessages((prev) => [...(prev ?? []), reply]);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `Coach couldn't respond: ${err.message}`
-          : "Something went wrong.",
-      );
+      setError(friendlyMessage(err, "coach-message"));
     } finally {
       setSending(false);
     }

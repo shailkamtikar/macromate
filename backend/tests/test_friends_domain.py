@@ -16,6 +16,23 @@ def test_compute_discipline_score_matches_adherence():
     assert score.days_logged == 1
 
 
+def test_compute_discipline_score_uses_days_in_period_for_a_live_partial_week():
+    """The leaderboard's current week is still in progress -- the adherence
+    denominator must be the number of days that have actually happened so
+    far, not a hardcoded 7, or an early-week user with a perfect record
+    reads as a near-zero score."""
+    week_start = date(2026, 9, 7)
+    logs = [
+        {"logged_at": "2026-09-07T08:00:00+00:00", "calories": 2000, "protein_g": 150, "carbs_g": 200, "fat_g": 65},
+    ]
+    score = compute_discipline_score(
+        user_id="u1", username="alice", food_logs=logs, week_start=week_start,
+        target_calories=2000, is_self=True, days_in_period=1,
+    )
+    assert score.discipline_score == 100
+    assert score.days_logged == 1
+
+
 def test_rank_leaderboard_sorts_descending():
     scores = [
         compute_discipline_score(user_id="a", username="a", food_logs=[], week_start=date(2026, 9, 7), target_calories=2000, is_self=False),

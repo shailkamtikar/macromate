@@ -9,6 +9,7 @@ import {
   MacroTargetsResponse,
 } from "@/lib/api";
 import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
+import { friendlyMessage } from "@/lib/errors";
 import { GlassSizesManager } from "@/components/GlassSizesManager";
 import { NotificationsManager } from "@/components/NotificationsManager";
 import { NumericField } from "@/components/NumericField";
@@ -171,7 +172,7 @@ export default function ProfilePage() {
       await refetchProfile();
       setSaveNotice("Saved — targets recalculated.");
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Couldn't save.");
+      setSaveError(friendlyMessage(err, "profile-save"));
     } finally {
       setSaving(false);
     }

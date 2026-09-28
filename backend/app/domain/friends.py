@@ -33,9 +33,10 @@ def compute_discipline_score(
     target_calories: float,
     is_self: bool,
     tz_name: str | None = None,
+    days_in_period: int = 7,
 ) -> DisciplineScore:
     daily = group_food_logs_by_day(food_logs, week_start, tz_name)
-    summary = summarize_week(daily, week_start, target_calories)
+    summary = summarize_week(daily, week_start, target_calories, days_in_period=days_in_period)
     return DisciplineScore(
         user_id=user_id,
         username=username,

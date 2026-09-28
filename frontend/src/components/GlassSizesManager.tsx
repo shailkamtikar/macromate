@@ -8,6 +8,7 @@ import {
   fetchGlassSizes,
 } from "@/lib/api";
 import { NumericField } from "@/components/NumericField";
+import { friendlyMessage } from "@/lib/errors";
 
 /** View/add/remove the user's configured water containers — the single
  * implementation shared by the standalone Profile page and the app
@@ -25,7 +26,7 @@ export function GlassSizesManager() {
   useEffect(() => {
     fetchGlassSizes()
       .then(setGlassSizes)
-      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load glass sizes."));
+      .catch((err) => setError(friendlyMessage(err, "glass-size")));
   }, []);
 
   async function handleAdd() {
@@ -36,7 +37,7 @@ export function GlassSizesManager() {
       setGlassSizes((prev) => [...(prev ?? []), created]);
       setLabel("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't add that size.");
+      setError(friendlyMessage(err, "glass-size"));
     }
   }
 
@@ -46,7 +47,7 @@ export function GlassSizesManager() {
       await deleteGlassSize(id);
       setGlassSizes((prev) => (prev ?? []).filter((g) => g.id !== id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't remove that size.");
+      setError(friendlyMessage(err, "glass-size"));
     }
   }
 

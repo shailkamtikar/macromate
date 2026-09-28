@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Achievements, WeeklyReport, fetchAchievements, fetchWeeklyReport } from "@/lib/api";
+import { friendlyMessage } from "@/lib/errors";
 import { useSession } from "@/lib/useSession";
 import { ActivityLogger } from "@/components/ActivityLogger";
 import { WeightHistoryChart } from "@/components/WeightHistoryChart";
@@ -63,7 +64,7 @@ export default function ProgressPage() {
         setReport(weekly);
         setAchievements(ach);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load progress."));
+      .catch((err) => setError(friendlyMessage(err, "progress-load")));
   }, [session]);
 
   if (sessionLoading) return <p className="p-10 text-sm text-on-surface-variant">Loading…</p>;

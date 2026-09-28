@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DietaryMode, GenerateDietResponse, generateDiet } from "@/lib/api";
+import { friendlyMessage } from "@/lib/errors";
 
 const MODE_LABELS: Record<DietaryMode, string> = {
   vegetarian: "Vegetarian",
@@ -22,7 +23,7 @@ export function DietPlanGenerator() {
     try {
       setPlan(await generateDiet(mode));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't generate a plan.");
+      setError(friendlyMessage(err, "diet-plan"));
     } finally {
       setLoading(false);
     }

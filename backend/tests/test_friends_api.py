@@ -263,6 +263,135 @@ def test_leaderboard_includes_current_streak_days(client, two_users):
         db._request("DELETE", "food_items", params={"id": f"eq.{food_id}"})
 
 
+def test_leaderboard_uses_days_elapsed_in_current_week_not_a_full_week(client, two_users):
+    """Regression test: the leaderboard's discipline score for the
+    currently-in-progress week must divide by the number of days that have
+    actually happened so far (1-7), not a hardcoded 7 -- otherwise a user
+    with a perfect record early in the week reads as a near-zero score."""
+    a, b = two_users["a"], two_users["b"]
+    db = SupabaseAdmin()
+    _befriend(client, a, b)
+
+    # Both users default to UTC -- pin it explicitly so the expected
+    # days_in_period is computed identically here and in the endpoint.
+    db.update("profiles", {"id": f"eq.{a['user_id']}"}, {"timezone": "UTC"})
+
+    today = datetime.now(timezone.utc).date()
+    week_start, _ = week_bounds(today)
+    expected_days_in_period = max(1, min(7, (today - week_start).days + 1))
+
+    food_id = _seed_food_item(db)
+    try:
+        # A's profile target_calories is 2000 (see _create_onboarded_user);
+        # log exactly that today so the day counts as "goal hit".
+        db.insert(
+            "food_logs",
+            {
+                "user_id": a["user_id"],
+                "food_item_id": food_id,
+                "meal_type": "lunch",
+                "quantity": 1,
+                "calories": 2000,
+                "protein_g": 150,
+                "carbs_g": 200,
+                "fat_g": 65,
+                "logged_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        leaderboard = client.get("/api/friends/leaderboard", headers=a["headers"])
+        assert leaderboard.status_code == 200, leaderboard.text
+        entries = {e["username"]: e for e in leaderboard.json()}
+
+        expected_score = round(1 / expected_days_in_period * 100)
+        assert entries[a["username"]]["discipline_score"] == expected_score
+        # The old bug always divided by 7 regardless of how much of the week
+        # had actually elapsed -- assert we're not silently back to that
+        # unless the test happens to run on the final day of the week.
+        if expected_days_in_period != 7:
+            assert entries[a["username"]]["discipline_score"] != round(1 / 7 * 100)
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+        db._request("DELETE", "food_items", params={"id": f"eq.{food_id}"})
+
+
+def test_leaderboard_buckets_each_friend_by_their_own_timezone(client, two_users):
+    """Regression test: a friend's food logs must be bucketed using THAT
+    friend's own profile timezone, not the requesting user's -- otherwise a
+    friend in a different timezone can have valid logs dropped or
+    misattributed to the wrong local day."""
+    a, b = two_users["a"], two_users["b"]
+    db = SupabaseAdmin()
+    _befriend(client, a, b)
+
+    db.update("profiles", {"id": f"eq.{a['user_id']}"}, {"timezone": "UTC"})
+    db.update("profiles", {"id": f"eq.{b['user_id']}"}, {"timezone": "Asia/Kolkata"})
+
+    # 00:30 IST *today* (Asia/Kolkata, UTC+5:30) -- safely in the past, and
+    # its UTC calendar date is necessarily the previous day. Bucketing this
+    # by B's own IST timezone must count it as "today" for B; bucketing it
+    # by A's UTC timezone (the bug) would put it on the wrong day/week.
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    ist_today = datetime.now(ist).date()
+    instant = datetime.combine(ist_today, time(0, 30), tzinfo=ist).astimezone(timezone.utc)
+    ist_local_date = instant.astimezone(ist).date()
+    utc_local_date = instant.date()
+    assert ist_local_date == ist_today
+    assert ist_local_date != utc_local_date, "test instant must straddle the UTC/IST day boundary"
+
+    food_id = _seed_food_item(db)
+    try:
+        db.insert(
+            "food_logs",
+            {
+                "user_id": b["user_id"],
+                "food_item_id": food_id,
+                "meal_type": "snack",
+                "quantity": 1,
+                "calories": 400,
+                "protein_g": 30,
+                "carbs_g": 40,
+                "fat_g": 10,
+                "logged_at": instant.isoformat(),
+            },
+        )
+
+        leaderboard = client.get("/api/friends/leaderboard", headers=a["headers"])
+        assert leaderboard.status_code == 200, leaderboard.text
+        entries = {e["username"]: e for e in leaderboard.json()}
+        # Bucketed correctly under B's own IST calendar day -- not silently
+        # dropped by a window computed from A's UTC timezone instead.
+        assert entries[b["username"]]["days_logged"] == 1
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food_id}"})
+        db._request("DELETE", "food_items", params={"id": f"eq.{food_id}"})
+
+
+def test_leaderboard_only_includes_accepted_friends(client, two_users):
+    """Isolation check: a user who is not an accepted friend must never
+    appear on the leaderboard, even if they exist in the system."""
+    a, b = two_users["a"], two_users["b"]
+    c = _create_onboarded_user("friendc")
+    try:
+        # A and B are accepted friends; C is a stranger to both.
+        _befriend(client, a, b)
+
+        leaderboard = client.get("/api/friends/leaderboard", headers=a["headers"])
+        assert leaderboard.status_code == 200, leaderboard.text
+        usernames = [e["username"] for e in leaderboard.json()]
+        assert a["username"] in usernames
+        assert b["username"] in usernames
+        assert c["username"] not in usernames
+    finally:
+        httpx.delete(
+            f"{settings.supabase_url}/auth/v1/admin/users/{c['user_id']}",
+            headers={"apikey": settings.supabase_service_role_key, "Authorization": f"Bearer {settings.supabase_service_role_key}"},
+            timeout=15,
+        )
+
+
 def test_friend_activity_groups_multiple_foods_into_one_item_per_meal(client, two_users):
     a, b = two_users["a"], two_users["b"]
     db = SupabaseAdmin()

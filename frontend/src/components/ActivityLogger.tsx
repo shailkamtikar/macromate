@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchActivityLogs, logManualActivity } from "@/lib/api";
 import { localDateIso as todayIso } from "@/lib/date";
+import { friendlyMessage } from "@/lib/errors";
 
 export function ActivityLogger() {
   const [steps, setSteps] = useState<number | "">("");
@@ -44,7 +45,7 @@ export function ActivityLogger() {
       );
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save.");
+      setError(friendlyMessage(err, "activity-log"));
     }
   }
 

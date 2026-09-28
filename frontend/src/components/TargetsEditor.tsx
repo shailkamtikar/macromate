@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityLevel,
-  ApiError,
   BiologicalSex,
   Goal,
   MACRO_CALORIE_TOLERANCE_PCT,
@@ -13,6 +12,7 @@ import {
   fetchMacroTargets,
 } from "@/lib/api";
 import { NumericField } from "@/components/NumericField";
+import { friendlyMessage } from "@/lib/errors";
 
 interface TargetsEditorProps {
   weightKg: number;
@@ -95,8 +95,17 @@ export function TargetsEditor({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate synchronous invalidation, not data-fetch sync
     setResult(null);
     onResult(null);
-    setLoading(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    // A cut/bulk goal requires a chosen pace before a target calculation
+    // means anything -- never run the calculation (and never silently fall
+    // back to a generic adjustment) while that rate hasn't been set yet.
+    if (goal !== "maintain" && rateKgPerWeek === null) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    setLoading(true);
     debounceRef.current = setTimeout(() => {
       setError(null);
       const custom =
@@ -156,7 +165,7 @@ export function TargetsEditor({
         .catch((err) => {
           setResult(null);
           onResult(null);
-          setError(err instanceof ApiError ? err.message : "Couldn't calculate targets.");
+          setError(friendlyMessage(err, "goals-calculate"));
         })
         .finally(() => setLoading(false));
     }, 300);
@@ -201,6 +210,15 @@ export function TargetsEditor({
       : false;
 
   const finalLowCalorieWarning = result?.low_calorie_warning ?? recommendedInfo?.low_calorie_warning ?? null;
+  const missingRate = goal !== "maintain" && rateKgPerWeek === null;
+
+  if (missingRate) {
+    return (
+      <p className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
+        Choose a weekly pace above to calculate your targets.
+      </p>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -247,7 +265,13 @@ export function TargetsEditor({
             Your daily calorie target
           </label>
           <span data-testid="selected-calories" className="font-display text-lg font-bold text-on-surface">
-            {selectedCalories} <span className="text-xs font-normal">kcal</span>
+            {recommended ? (
+              <>
+                {selectedCalories} <span className="text-xs font-normal">kcal</span>
+              </>
+            ) : (
+              <span className="text-sm font-normal text-on-surface-variant">Calculating…</span>
+            )}
           </span>
         </div>
         <input
@@ -270,6 +294,7 @@ export function TargetsEditor({
             value={selectedCalories}
             min={sliderMin}
             max={sliderMax}
+            disabled={!recommended}
             onLiveChange={(n) => {
               userEditedCaloriesRef.current = true;
               setCalorieOverride(n);
@@ -278,7 +303,7 @@ export function TargetsEditor({
               userEditedCaloriesRef.current = true;
               setCalorieOverride(n);
             }}
-            className="input w-28"
+            className="input w-28 disabled:opacity-60"
           />
           {recommended && calorieOverride !== null && calorieOverride !== recommended && (
             <button

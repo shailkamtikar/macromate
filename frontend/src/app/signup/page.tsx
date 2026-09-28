@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { friendlyAuthMessage } from "@/lib/errors";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function SignupPage() {
@@ -27,7 +28,7 @@ export default function SignupPage() {
     setLoading(false);
 
     if (signUpError) {
-      setError(signUpError.message);
+      setError(friendlyAuthMessage(signUpError, "signup"));
       return;
     }
 

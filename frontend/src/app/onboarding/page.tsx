@@ -9,6 +9,7 @@ import { NumericField } from "@/components/NumericField";
 import { RatePicker } from "@/components/RatePicker";
 import { TargetsEditor } from "@/components/TargetsEditor";
 import { browserTimezone } from "@/lib/date";
+import { friendlyMessage } from "@/lib/errors";
 import { useRefetchProfile } from "@/lib/ProfileProvider";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
@@ -129,7 +130,7 @@ export default function OnboardingPage() {
       await refetchProfile();
       router.push("/today");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save profile.");
+      setError(friendlyMessage(err, "profile-save"));
     } finally {
       setSubmitting(false);
     }

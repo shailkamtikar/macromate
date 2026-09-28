@@ -13,6 +13,7 @@ import {
   searchUsers,
   sendFriendRequest,
 } from "@/lib/api";
+import { friendlyMessage } from "@/lib/errors";
 import { supabase } from "@/lib/supabaseClient";
 import { useSession } from "@/lib/useSession";
 
@@ -56,7 +57,7 @@ export default function FriendsPage() {
       setLeaderboard(l);
       setActivity(a);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load friends.");
+      setError(friendlyMessage(err, "friends-load"));
     }
   }, []);
 
@@ -113,7 +114,7 @@ export default function FriendsPage() {
     try {
       setResults(await searchUsers(q));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed.");
+      setError(friendlyMessage(err, "friends-search"));
     }
   }
 
@@ -127,7 +128,7 @@ export default function FriendsPage() {
       setResults([]);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send request.");
+      setError(friendlyMessage(err, "friends-request"));
     }
   }
 
@@ -137,7 +138,7 @@ export default function FriendsPage() {
       await respondToFriendRequest(id, accept);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't respond.");
+      setError(friendlyMessage(err, "friends-respond"));
     }
   }
 

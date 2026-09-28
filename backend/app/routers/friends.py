@@ -195,18 +195,27 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
     # a friend who has leaderboard_visible = false.
     visible_profiles = [p for p in profiles if p["id"] == current_user.user_id or p["leaderboard_visible"]]
 
-    requester_tz = next(
-        (p.get("timezone") for p in profiles if p["id"] == current_user.user_id), None
-    ) or "UTC"
-    today = local_today(requester_tz)
-    week_start, _ = week_bounds(today)
-    start, _ = day_bounds_utc(week_start, requester_tz)
-    _, end = day_bounds_utc(week_start + timedelta(days=6), requester_tz)
-    streak_start, _ = day_bounds_utc(today - timedelta(days=STREAK_LOOKBACK_DAYS), requester_tz)
-
     scores = []
     streaks: dict[str, int] = {}
     for profile in visible_profiles:
+        # Every friend's own local calendar (timezone, "today", and the
+        # current week) drives their bucketing -- never the requesting
+        # user's timezone, or a friend in a different timezone gets logs
+        # dropped or bucketed onto the wrong local day.
+        friend_tz = profile.get("timezone") or "UTC"
+        friend_today = local_today(friend_tz)
+        friend_week_start, _ = week_bounds(friend_today)
+        start, _ = day_bounds_utc(friend_week_start, friend_tz)
+        _, end = day_bounds_utc(friend_week_start + timedelta(days=6), friend_tz)
+        # The leaderboard always reflects the current, still-in-progress
+        # week -- so the adherence-percentage denominator must be the
+        # number of days that have actually happened so far this week for
+        # THIS friend, not a full 7, or early-week scores read as near-zero.
+        days_in_period = max(1, min(7, (friend_today - friend_week_start).days + 1))
+        streak_start, _ = day_bounds_utc(
+            friend_today - timedelta(days=STREAK_LOOKBACK_DAYS), friend_tz
+        )
+
         logs = db.select(
             "food_logs",
             {
@@ -219,10 +228,11 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
                 user_id=profile["id"],
                 username=profile["username"],
                 food_logs=logs,
-                week_start=week_start,
+                week_start=friend_week_start,
                 target_calories=profile["target_calories"],
                 is_self=profile["id"] == current_user.user_id,
-                tz_name=requester_tz,
+                tz_name=friend_tz,
+                days_in_period=days_in_period,
             )
         )
 
@@ -238,9 +248,9 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
             },
         )
         logged_dates = {
-            utc_timestamp_to_local_date(row["logged_at"], requester_tz) for row in streak_logs
+            utc_timestamp_to_local_date(row["logged_at"], friend_tz) for row in streak_logs
         }
-        streaks[profile["id"]] = calculate_logging_streak(logged_dates, today)
+        streaks[profile["id"]] = calculate_logging_streak(logged_dates, friend_today)
 
     ranked = rank_leaderboard(scores)
     return [
