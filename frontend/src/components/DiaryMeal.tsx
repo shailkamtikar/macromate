@@ -85,7 +85,7 @@ export function DiaryMeal({
   return (
     <section
       data-testid={`meal-${meal}`}
-      className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm"
+      className="card p-4"
     >
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-on-surface">{MEAL_LABELS[meal]}</h3>

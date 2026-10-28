@@ -118,7 +118,13 @@ export function NotificationPoller() {
         const today = localDateIso(new Date());
         const seen = readSeen(SEEN_TRIGGERS_KEY);
         for (const trigger of triggers) {
-          const key = `${trigger.kind}:${today}`;
+          // A logging reminder is only "due" inside a 15-minute window after
+          // each configured time, so keying it by window lets every reminder
+          // time of the day fire once (not just the first). The other kinds
+          // stay due for hours and must fire once per day.
+          const slot =
+            trigger.kind === "logging_reminder" ? `:${Math.floor(Date.now() / (15 * 60_000))}` : "";
+          const key = `${trigger.kind}:${today}${slot}`;
           if (seen.has(key)) continue;
           seen.add(key);
           notify(trigger.title, trigger.body, key);
@@ -185,7 +191,7 @@ export function NotificationPoller() {
   if (!banner) return null;
 
   const content = (
-    <div className="reveal-in flex items-start gap-3 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-3 shadow-sm">
+    <div className="reveal-in flex items-start gap-3 card p-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-on-surface">{banner.title}</p>
         <p className="text-xs text-on-surface-variant">{banner.body}</p>

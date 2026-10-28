@@ -84,7 +84,7 @@ export function MonthCalendar({
         role="dialog"
         aria-label="Choose a date"
         data-testid="month-calendar"
-        className="absolute left-0 right-0 top-full z-40 mt-2 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-lg"
+        className="absolute left-0 right-0 top-full z-40 mt-2 card p-4 shadow-lg"
       >
         <div className="mb-2 flex items-center justify-between">
           <button

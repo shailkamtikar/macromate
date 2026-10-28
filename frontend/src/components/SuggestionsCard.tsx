@@ -43,7 +43,7 @@ export function SuggestionsCard({
     return (
       <section
         data-testid="suggestions-error"
-        className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+        className="card p-5"
       >
         {header}
         <p className="text-sm text-on-surface-variant">

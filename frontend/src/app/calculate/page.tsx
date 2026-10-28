@@ -426,7 +426,8 @@ function CalculatePageInner() {
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4">
         <header>
-          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+          <p className="eyebrow">Describe · Review · Log</p>
+          <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-on-surface sm:text-4xl">
             Calculate with AI
           </h1>
           <p className="text-sm text-on-surface-variant">
@@ -439,7 +440,7 @@ function CalculatePageInner() {
 
         <form
           onSubmit={handleCalculate}
-          className="space-y-3 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+          className="space-y-3 card p-5"
         >
           <textarea
             value={text}
@@ -464,7 +465,7 @@ function CalculatePageInner() {
             <button
               type="submit"
               disabled={parsing || text.trim().length === 0}
-              className="ml-auto rounded-[var(--radius-control)] bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
+              className="ml-auto rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-transform active:scale-95 disabled:opacity-60"
             >
               {parsing ? "Working out what you ate…" : "Calculate"}
             </button>
@@ -570,7 +571,7 @@ function ReviewRowCard({
   const parsedUnitLabel = row.parsedUnit === "g" ? "g" : row.parsedUnit === "ml" ? "ml" : "serving(s)";
 
   return (
-    <div className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+    <div className="card p-4">
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs text-on-surface-variant">&quot;{row.raw_phrase}&quot;</p>
         {row.status !== "logged" && (

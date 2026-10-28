@@ -62,8 +62,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static shell assets only: cache-first, since these are fingerprinted
-  // or rarely-changing brand assets, not data.
+  // The small brand/offline allowlist only: cache-first, since these are
+  // rarely-changing assets, not data. (Next's own JS/CSS bundles are NOT cached
+  // here: this app needs the network, and the offline page is the fallback.)
   if (SHELL_ASSETS.includes(url.pathname)) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request)),

@@ -24,7 +24,7 @@ const BULK_OPTIONS: { rate: number; label: string; blurb: string }[] = [
 export function RatePicker({ goal, value, onChange }: RatePickerProps) {
   if (goal === "maintain") {
     return (
-      <p className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
+      <p className="card p-3 text-xs text-on-surface-variant">
         Maintaining weight — your target will match your calculated maintenance calories, no
         deficit or surplus.
       </p>

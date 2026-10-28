@@ -313,7 +313,7 @@ export function FoodPicker({
   ];
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+    <section className="card p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-on-surface">Add food</h2>
         <label className="flex items-center gap-1.5 text-xs text-on-surface-variant">

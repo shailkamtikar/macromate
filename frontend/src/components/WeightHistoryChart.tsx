@@ -46,7 +46,7 @@ function describeTrend(points: WeightPoint[]): string {
  * fake/interpolated points. Shows a line graph once there's more than one
  * entry; a single-point state when there's exactly one; and an empty state
  * when there's none, rather than inventing a trend that isn't there. */
-export function WeightHistoryChart({ userId }: { userId: string }) {
+export function WeightHistoryChart({ userId, refreshKey = 0 }: { userId: string; refreshKey?: number }) {
   const [points, setPoints] = useState<WeightPoint[] | null>(null);
 
   useEffect(() => {
@@ -69,11 +69,11 @@ export function WeightHistoryChart({ userId }: { userId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, refreshKey]);
 
   if (points === null) {
     return (
-      <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+      <section className="card p-4">
         <p className="text-xs text-on-surface-variant">Loading weight history…</p>
       </section>
     );
@@ -92,7 +92,7 @@ export function WeightHistoryChart({ userId }: { userId: string }) {
 
   if (points.length === 1) {
     return (
-      <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+      <section className="card p-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
           Weight
         </p>
@@ -126,7 +126,7 @@ export function WeightHistoryChart({ userId }: { userId: string }) {
   const chartSummary = `Weight chart from ${formatDate(first.date)} (${first.weight_kg}kg) to ${formatDate(latest.date)} (${latest.weight_kg}kg). ${interpretation}`;
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+    <section className="card p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
           Weight history

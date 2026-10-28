@@ -69,7 +69,7 @@ export function AchievementsCard({ achievements }: { achievements: Achievements 
   const hitMacros = MACRO_LABELS.filter((m) => achievements.macro_goals_hit_today[m.key]);
 
   return (
-    <section className="reveal-in rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+    <section className="reveal-in card p-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">

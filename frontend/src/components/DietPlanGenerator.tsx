@@ -30,7 +30,7 @@ export function DietPlanGenerator() {
   }
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+    <section className="card p-5">
       <h2 className="mb-1 text-sm font-semibold text-on-surface">Generate a meal plan</h2>
       <p className="mb-3 text-xs text-on-surface-variant">
         Built to fit your actual daily target — not a generic plan.
@@ -50,7 +50,7 @@ export function DietPlanGenerator() {
         <button
           onClick={handleGenerate}
           disabled={loading}
-          className="ml-auto rounded-[var(--radius-control)] bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
+          className="ml-auto rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-transform active:scale-95 disabled:opacity-60"
         >
           {loading ? "Generating…" : "Generate"}
         </button>

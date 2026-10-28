@@ -241,3 +241,18 @@ def test_remove_water_respects_a_custom_container_size(client, two_users):
     )
     assert removed.status_code == 200, removed.text
     assert removed.json()["total_ml"] == 0
+
+
+def test_deleting_a_missing_or_foreign_glass_size_is_a_404(client, two_users):
+    a, b = two_users["a"], two_users["b"]
+    created = client.post(
+        "/api/glass-sizes", headers=a["headers"], json={"label": "Mine", "volume_ml": 300}
+    )
+    assert created.status_code == 200
+    glass_id = created.json()["id"]
+    # B cannot delete (or even confirm the existence of) A's glass size.
+    assert client.delete(f"/api/glass-sizes/{glass_id}", headers=b["headers"]).status_code == 404
+    assert client.delete(
+        "/api/glass-sizes/00000000-0000-0000-0000-000000000000", headers=a["headers"]
+    ).status_code == 404
+    assert client.delete(f"/api/glass-sizes/{glass_id}", headers=a["headers"]).status_code == 204

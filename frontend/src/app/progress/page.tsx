@@ -6,6 +6,7 @@ import { friendlyMessage } from "@/lib/errors";
 import { useSession } from "@/lib/useSession";
 import { ActivityLogger } from "@/components/ActivityLogger";
 import { WeightHistoryChart } from "@/components/WeightHistoryChart";
+import { WeightQuickLog } from "@/components/WeightQuickLog";
 import { AchievementsCard } from "@/components/AchievementsCard";
 import { Icon } from "@/components/Icon";
 
@@ -57,6 +58,7 @@ export default function ProgressPage() {
   const [report, setReport] = useState<WeeklyReport | null>(null);
   const [achievements, setAchievements] = useState<Achievements | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [weightVersion, setWeightVersion] = useState(0);
 
   useEffect(() => {
     if (!session) return;
@@ -84,7 +86,8 @@ export default function ProgressPage() {
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4">
         <header>
-          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+          <p className="eyebrow">Trends · Wins · Focus</p>
+          <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-on-surface sm:text-4xl">
             Progress
           </h1>
           <p className="text-sm text-on-surface-variant">This week vs. last week.</p>
@@ -96,9 +99,15 @@ export default function ProgressPage() {
           <p className="text-sm text-on-surface-variant">Loading…</p>
         ) : (
           <>
-            <WeightHistoryChart userId={session.user.id} />
+            <WeightHistoryChart userId={session.user.id} refreshKey={weightVersion} />
+            <WeightQuickLog
+              onLogged={() => {
+                setWeightVersion((v) => v + 1);
+                fetchAchievements().then(setAchievements).catch(() => {});
+              }}
+            />
 
-            <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+            <section className="card p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                 {report.current.is_partial ? "This week so far" : "This week"}
               </p>
@@ -117,7 +126,7 @@ export default function ProgressPage() {
               )}
             </section>
 
-            <section className="space-y-2 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+            <section className="space-y-2 card p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                 Macro adherence — {report.current.is_partial ? "so far" : "this week"}
               </p>
@@ -152,7 +161,7 @@ export default function ProgressPage() {
             {achievements && <AchievementsCard achievements={achievements} />}
 
             {report.previous.days_logged > 0 ? (
-              <section className="space-y-3 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+              <section className="space-y-3 card p-5">
                 <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                   Daily averages — solid = {report.current.is_partial ? "this week so far" : "this week"}, faded = last week
                 </p>
@@ -210,7 +219,7 @@ export default function ProgressPage() {
             )}
 
             {report.improvement_areas.length > 0 && (
-              <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+              <section className="card p-4">
                 <div className="mb-2 flex items-center gap-1.5 text-on-surface-variant">
                   <Icon name={"trending_up"} className="text-lg" />
                   <span className="text-xs font-bold uppercase tracking-wider">Where to focus</span>

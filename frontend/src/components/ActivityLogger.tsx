@@ -50,7 +50,7 @@ export function ActivityLogger() {
   }
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+    <section className="card p-5">
       <h2 className="mb-1 text-sm font-semibold text-on-surface">Today&apos;s activity</h2>
       <p className="mb-3 text-xs text-on-surface-variant">
         Automatic Health Connect / HealthKit sync isn&apos;t possible from a web app — both are
@@ -85,7 +85,7 @@ export function ActivityLogger() {
         </label>
         <button
           onClick={handleSave}
-          className="ml-auto self-end rounded-[var(--radius-control)] bg-primary px-4 py-2 text-sm font-semibold text-on-primary"
+          className="ml-auto self-end rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-transform active:scale-95"
         >
           Save
         </button>

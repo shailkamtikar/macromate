@@ -530,7 +530,7 @@ function EnergyCardSkeleton() {
   return (
     <section
       aria-busy="true"
-      className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+      className="card p-5"
     >
       <div className="flex items-center justify-between">
         <div className="space-y-2">

@@ -13,6 +13,7 @@ import {
   searchUsers,
   sendFriendRequest,
 } from "@/lib/api";
+import { m } from "motion/react";
 import { friendlyMessage } from "@/lib/errors";
 import { supabase } from "@/lib/supabaseClient";
 import { useSession } from "@/lib/useSession";
@@ -155,7 +156,8 @@ export default function FriendsPage() {
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4">
         <header>
-          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+          <p className="eyebrow">Compare · Cheer · Stay accountable</p>
+          <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-on-surface sm:text-4xl">
             Friends
           </h1>
           <p className="text-sm text-on-surface-variant">
@@ -163,7 +165,7 @@ export default function FriendsPage() {
           </p>
         </header>
 
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <section className="card p-5">
           <input
             value={query}
             onChange={(e) => handleSearch(e.target.value)}
@@ -194,7 +196,7 @@ export default function FriendsPage() {
         {notice && <p className="text-sm text-primary">{notice}</p>}
 
         {incoming.length > 0 && (
-          <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+          <section className="card p-5">
             <h2 className="mb-2 text-sm font-semibold text-on-surface">Requests</h2>
             {incoming.map((f) => (
               <div key={f.id} className="flex items-center justify-between py-1.5">
@@ -224,7 +226,7 @@ export default function FriendsPage() {
           </p>
         )}
 
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <section className="card p-5">
           <h2 className="mb-2 text-sm font-semibold text-on-surface">This week&apos;s leaderboard</h2>
           {leaderboard === null ? (
             <p className="text-sm text-on-surface-variant">Loading…</p>
@@ -235,8 +237,10 @@ export default function FriendsPage() {
           ) : (
             <ol className="space-y-1.5">
               {leaderboard.map((entry, i) => (
-                <li
+                <m.li
                   key={entry.user_id}
+                  layout
+                  transition={{ duration: 0.35 }}
                   className={`flex items-center justify-between rounded-[var(--radius-control)] px-3 py-2 ${
                     entry.is_self ? "bg-primary-container/40" : "bg-surface-container-low"
                   }`}
@@ -255,14 +259,14 @@ export default function FriendsPage() {
                   <span className="text-sm font-semibold text-on-surface">
                     {entry.discipline_score}%
                   </span>
-                </li>
+                </m.li>
               ))}
             </ol>
           )}
         </section>
 
         {accepted.length > 0 && (
-          <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+          <section className="card p-5">
             <h2 className="mb-2 text-sm font-semibold text-on-surface">Friend activity</h2>
             {activity === null ? (
               <p className="text-sm text-on-surface-variant">Loading…</p>

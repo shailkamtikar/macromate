@@ -171,14 +171,15 @@ export default function ProfilePage() {
     <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
       <div className="w-full max-w-2xl space-y-4">
         <header>
-          <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+          <p className="eyebrow">You · Goals · Preferences</p>
+          <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-on-surface sm:text-4xl">
             Profile &amp; Settings
           </h1>
         </header>
 
         <form
           onSubmit={handleSaveProfile}
-          className="space-y-4 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+          className="space-y-4 card p-5"
         >
           <h2 id="profile-basics-section" className="text-sm font-semibold text-on-surface">
             Profile &amp; goals
@@ -344,17 +345,17 @@ export default function ProfilePage() {
           {saveNotice && <p className="text-sm text-primary">{saveNotice}</p>}
         </form>
 
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <section className="card p-5">
           <h2 className="mb-2 text-sm font-semibold text-on-surface">Glass sizes</h2>
           <GlassSizesManager />
         </section>
 
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <section className="card p-5">
           <h2 className="mb-2 text-sm font-semibold text-on-surface">Appearance</h2>
           <ThemeToggle />
         </section>
 
-        <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <section className="card p-5">
           <h2 className="mb-2 text-sm font-semibold text-on-surface">Notifications</h2>
           <NotificationsManager />
         </section>

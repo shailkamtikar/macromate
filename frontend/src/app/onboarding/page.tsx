@@ -141,7 +141,7 @@ export default function OnboardingPage() {
     <main className="flex flex-1 justify-center px-6 py-10">
       <div className="w-full max-w-md space-y-6">
         <header className="space-y-2">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-on-surface">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-on-surface">
             Set up your profile
           </h1>
           <div className="flex items-center gap-1.5">
@@ -159,7 +159,7 @@ export default function OnboardingPage() {
           </p>
         </header>
 
-        <div className="space-y-4 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
+        <div className="space-y-4 card p-5">
           {step === 0 && (
             <div className="space-y-4">
               <label className="flex flex-col gap-1 text-xs font-medium text-on-surface-variant">

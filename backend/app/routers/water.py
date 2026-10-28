@@ -69,8 +69,15 @@ def create_glass_size(
 @router.delete("/glass-sizes/{glass_size_id}", status_code=204)
 def delete_glass_size(glass_size_id: str, current_user: CurrentUserDep) -> None:
     db = SupabaseAdmin()
-    # Scope the delete by user_id too, not just id — never trust that a
-    # client-supplied path id belongs to the caller.
+    # Scope by user_id too, not just id -- never trust that a client-supplied
+    # path id belongs to the caller -- and 404 for a missing/foreign id like
+    # the food-log delete does, instead of a silent no-op 204.
+    owned = db.select(
+        "glass_sizes",
+        {"id": f"eq.{glass_size_id}", "user_id": f"eq.{current_user.user_id}", "select": "id"},
+    )
+    if not owned:
+        raise HTTPException(status_code=404, detail="Glass size not found")
     db._request(
         "DELETE",
         "glass_sizes",

@@ -214,7 +214,7 @@ export function TargetsEditor({
 
   if (missingRate) {
     return (
-      <p className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
+      <p className="card p-3 text-xs text-on-surface-variant">
         Choose a weekly pace above to calculate your targets.
       </p>
     );
