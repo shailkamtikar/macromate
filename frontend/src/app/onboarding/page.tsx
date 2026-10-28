@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ActivityLevel, BiologicalSex, Goal, MacroMode, MacroTargetsResponse } from "@/lib/api";
+import {
+  ActivityLevel,
+  BiologicalSex,
+  Goal,
+  MacroMode,
+  MacroTargetsResponse,
+  saveProfile,
+} from "@/lib/api";
 import { ActivityLevelPicker } from "@/components/ActivityLevelPicker";
 import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { NumericField } from "@/components/NumericField";
@@ -11,7 +18,6 @@ import { TargetsEditor } from "@/components/TargetsEditor";
 import { browserTimezone } from "@/lib/date";
 import { friendlyMessage } from "@/lib/errors";
 import { useRefetchProfile } from "@/lib/ProfileProvider";
-import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
 
@@ -77,7 +83,6 @@ export default function OnboardingPage() {
     return <BootstrapLoader />;
   }
 
-  const currentSession = session;
 
   const canLeaveBasics = username.trim().length > 0 && weightKg > 0 && heightCm > 0 && ageYears > 0;
   const canLeaveGoalStep = goal === "maintain" || rateKgPerWeek !== null;
@@ -100,29 +105,25 @@ export default function OnboardingPage() {
     setError(null);
 
     try {
-      const { error: upsertError } = await supabase.from("profiles").upsert({
-        id: currentSession.user.id,
+      const t = targetsResult.targets;
+      await saveProfile({
         username,
         sex,
         age_years: ageYears,
         height_cm: heightCm,
+        weight_kg: weightKg,
         activity_level: activityLevel,
         goal,
         rate_kg_per_week: goal === "maintain" ? null : rateKgPerWeek,
         macro_mode: macroMode,
-        target_calories: targetsResult.targets.calories,
-        target_protein_g: targetsResult.targets.protein_g,
-        target_carbs_g: targetsResult.targets.carbs_g,
-        target_fat_g: targetsResult.targets.fat_g,
-        water_goal_ml: targetsResult.water_goal_ml,
+        calorie_override: t.calories,
+        custom_protein_g: macroMode === "custom" ? t.protein_g : null,
+        custom_carbs_g: macroMode === "custom" ? t.carbs_g : null,
+        custom_fat_g: macroMode === "custom" ? t.fat_g : null,
+        dietary_mode: "non_vegetarian",
+        leaderboard_visible: true,
         timezone: browserTimezone(),
       });
-      if (upsertError) throw upsertError;
-
-      const { error: weightLogError } = await supabase
-        .from("weight_logs")
-        .insert({ user_id: currentSession.user.id, weight_kg: weightKg });
-      if (weightLogError) throw weightLogError;
 
       // The shared ProfileProvider cache still has the pre-onboarding
       // "no profile yet" (null) result -- without this, Today would read

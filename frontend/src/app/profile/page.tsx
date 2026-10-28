@@ -7,6 +7,7 @@ import {
   Goal,
   MacroMode,
   MacroTargetsResponse,
+  saveProfile,
 } from "@/lib/api";
 import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
 import { friendlyMessage } from "@/lib/errors";
@@ -108,7 +109,6 @@ export default function ProfilePage() {
   // Closures below are invoked asynchronously later, so TS can't narrow
   // the outer `session`/`profile` inside them even after the guard above
   // — bind non-null locals here instead.
-  const currentSession = session;
   const currentProfile = profile;
 
   const effectiveGoal = (form.goal ?? currentProfile.goal) as Goal;
@@ -133,42 +133,31 @@ export default function ProfilePage() {
     setSaveError(null);
     setSaveNotice(null);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          username: form.username ?? currentProfile.username,
-          sex: form.sex ?? currentProfile.sex,
-          age_years: form.age_years ?? currentProfile.age_years,
-          height_cm: form.height_cm ?? currentProfile.height_cm,
-          activity_level: form.activity_level ?? currentProfile.activity_level,
-          goal: effectiveGoal,
-          rate_kg_per_week: effectiveGoal === "maintain" ? null : rateKgPerWeek,
-          macro_mode: macroMode,
-          dietary_mode: form.dietary_mode ?? "non_vegetarian",
-          leaderboard_visible: form.leaderboard_visible ?? currentProfile.leaderboard_visible,
-          target_calories: targetsResult.targets.calories,
-          target_protein_g: targetsResult.targets.protein_g,
-          target_carbs_g: targetsResult.targets.carbs_g,
-          target_fat_g: targetsResult.targets.fat_g,
-          water_goal_ml: targetsResult.water_goal_ml,
-        })
-        .eq("id", currentSession.user.id);
-      if (error) throw error;
+      // The server recomputes the targets from these inputs (and logs the
+      // weight only if it changed) -- the browser never writes them itself.
+      const t = targetsResult.targets;
+      await saveProfile({
+        username: form.username ?? currentProfile.username,
+        sex: (form.sex ?? currentProfile.sex) as "male" | "female",
+        age_years: form.age_years ?? currentProfile.age_years,
+        height_cm: form.height_cm ?? currentProfile.height_cm,
+        weight_kg: effectiveWeight as number,
+        activity_level: (form.activity_level ?? currentProfile.activity_level) as ActivityLevel,
+        goal: effectiveGoal,
+        rate_kg_per_week: effectiveGoal === "maintain" ? null : rateKgPerWeek,
+        macro_mode: macroMode,
+        calorie_override: t.calories,
+        custom_protein_g: macroMode === "custom" ? t.protein_g : null,
+        custom_carbs_g: macroMode === "custom" ? t.carbs_g : null,
+        custom_fat_g: macroMode === "custom" ? t.fat_g : null,
+        dietary_mode: form.dietary_mode ?? "non_vegetarian",
+        leaderboard_visible: form.leaderboard_visible ?? currentProfile.leaderboard_visible,
+      });
+      if (weightKg !== null) setLatestWeightKg(weightKg);
 
-      // Only log a new weight entry if it actually changed — avoids
-      // spamming weight_logs (and skewing the weight trend graph) with a
-      // duplicate row every time the user saves unrelated settings.
-      if (weightKg !== null && weightKg !== latestWeightKg) {
-        const { error: weightError } = await supabase
-          .from("weight_logs")
-          .insert({ user_id: currentSession.user.id, weight_kg: weightKg });
-        if (weightError) throw weightError;
-        setLatestWeightKg(weightKg);
-      }
-
-      // The update above went straight through Supabase, not through the
-      // shared ProfileProvider cache -- without this, Today/AppSidebar
-      // would keep showing pre-edit targets until the next full reload.
+      // The save bypasses the shared ProfileProvider cache -- without this,
+      // Today/AppSidebar would keep showing pre-edit targets until the next
+      // full reload.
       await refetchProfile();
       setSaveNotice("Saved — targets recalculated.");
     } catch (err) {

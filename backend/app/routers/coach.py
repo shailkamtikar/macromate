@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
-from app.core.gemini import GeminiUnavailable, generate_text
+from app.core.gemini import GeminiUnavailable, QuotaExceeded, generate_text
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.coach import build_context, context_to_prompt_text, deterministic_fast_path
 from app.domain.coach_actions import execute_add_food, execute_log_water, execute_remove_food
@@ -270,9 +270,21 @@ def send_message(payload: CoachMessageRequest, current_user: CurrentUserDep) -> 
             history=history,
             timeout=20,
             fallback_timeout=COACH_FALLBACK_TIMEOUT,
+            json_mode=True,
+            user_id=user_id,
+            route="coach",
         )
-    except GeminiUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Coach is temporarily unavailable: {exc}")
+    except QuotaExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=exc.message,
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except GeminiUnavailable:
+        # Details are already logged by the Gemini wrapper; never echo them.
+        raise HTTPException(
+            status_code=503, detail="Coach is temporarily unavailable. Please try again shortly."
+        )
 
     try:
         intent = parse_coach_intent(raw_response)

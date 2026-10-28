@@ -136,7 +136,7 @@ def _stub_gemini(monkeypatch, items: list[dict]):
     most once per request regardless of how many foods were parsed."""
     calls = {"count": 0}
 
-    def fake_generate_text(prompt, *, system_instruction=None, timeout=20):
+    def fake_generate_text(prompt, *, system_instruction=None, timeout=20, **_ignored):
         calls["count"] += 1
         return json.dumps(items)
 
@@ -332,7 +332,7 @@ def test_multiple_items_use_exactly_one_gemini_call_and_each_resolves_independen
 def test_gemini_unavailable_returns_a_graceful_error_not_a_stack_trace(
     client, auth_headers, monkeypatch
 ):
-    def raise_unavailable(prompt, *, system_instruction=None, timeout=20):
+    def raise_unavailable(prompt, *, system_instruction=None, timeout=20, **_ignored):
         raise GeminiUnavailable("both models down")
 
     monkeypatch.setattr("app.routers.ai_food.generate_text", raise_unavailable)
@@ -345,7 +345,7 @@ def test_gemini_unavailable_returns_a_graceful_error_not_a_stack_trace(
 
 @requires_supabase
 def test_malformed_gemini_response_returns_a_graceful_error(client, auth_headers, monkeypatch):
-    def fake_generate_text(prompt, *, system_instruction=None, timeout=20):
+    def fake_generate_text(prompt, *, system_instruction=None, timeout=20, **_ignored):
         return "not json at all"
 
     monkeypatch.setattr("app.routers.ai_food.generate_text", fake_generate_text)
@@ -362,7 +362,7 @@ def test_incomplete_estimate_fields_are_a_graceful_error_not_a_crash(
     """Gemini omitting a required estimate field is malformed output, not a
     reason to crash or silently invent the missing number."""
 
-    def fake_generate_text(prompt, *, system_instruction=None, timeout=20):
+    def fake_generate_text(prompt, *, system_instruction=None, timeout=20, **_ignored):
         return json.dumps(
             [{"raw_phrase": "eggs", "search_name": "eggs", "amount": 2, "unit": "serving"}]
         )
@@ -669,6 +669,12 @@ def test_calculate_foods_estimates_a_food_with_no_database_match_via_real_gemini
     body = resp.json()
     assert len(body["items"]) >= 1
     item = body["items"][0]
+    if item["ambiguous"]:
+        # The shared food database may legitimately contain several paneer
+        # foods; then the user is asked which one -- with a ready AI-estimate
+        # fallback so it is never a dead end.
+        assert item["candidates"] and item["estimate"]["calories"] > 0
+        return
     assert item["resolved"] is True
     assert item["source"] in ("database", "ai_estimate")
     assert item["calories"] > 0

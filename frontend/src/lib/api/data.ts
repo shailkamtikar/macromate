@@ -557,3 +557,51 @@ export async function fetchDaysSummary(start: string, end: string): Promise<DayS
   const res = await authFetch(`/api/days/summary?start=${start}&end=${end}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Profile: the browser sends INPUTS only; the server recomputes and stores the
+// calorie/macro targets (it is the only writer of profile targets and weight).
+// ---------------------------------------------------------------------------
+export interface ProfileInput extends MacroTargetsRequest {
+  username: string;
+  dietary_mode: DietaryModeInput;
+  leaderboard_visible: boolean;
+  timezone?: string;
+}
+
+export type DietaryModeInput = "vegetarian" | "non_vegetarian" | "egg_inclusive";
+
+export interface ProfileSaved {
+  profile: {
+    id: string;
+    username: string;
+    target_calories: number;
+    target_protein_g: number;
+    target_carbs_g: number;
+    target_fat_g: number;
+    water_goal_ml: number | null;
+    timezone: string;
+  };
+  targets: MacroTargetsResponse;
+  weight_kg: number;
+}
+
+export async function saveProfile(input: ProfileInput): Promise<ProfileSaved> {
+  const res = await authFetch("/api/profile", { method: "PUT", body: JSON.stringify(input) });
+  return res.json();
+}
+
+export interface WeightLog {
+  id: string;
+  weight_kg: number;
+  logged_at: string;
+}
+
+/** `logDate` (YYYY-MM-DD) backfills a past day; omit it for "now". */
+export async function logWeight(weight_kg: number, logDate?: string): Promise<WeightLog> {
+  const res = await authFetch("/api/weight-logs", {
+    method: "POST",
+    body: JSON.stringify({ weight_kg, log_date: logDate }),
+  });
+  return res.json();
+}

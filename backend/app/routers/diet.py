@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
-from app.core.gemini import GeminiUnavailable, generate_text
+from app.core.gemini import GeminiUnavailable, QuotaExceeded, generate_text
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.diet_generator import (
     GeneratedMeal,
@@ -44,15 +44,34 @@ def generate_diet(payload: GenerateDietRequest, current_user: CurrentUserDep) ->
     system_instruction = build_system_instruction(targets, payload.dietary_mode)
     try:
         raw = generate_text(
-            "Generate today's meal plan.", system_instruction=system_instruction, timeout=25
+            "Generate today's meal plan.",
+            system_instruction=system_instruction,
+            timeout=25,
+            json_mode=True,
+            # Meal plans need some arithmetic, so allow a little reasoning
+            # (the plan is still validated against the targets server-side).
+            thinking_budget=1024,
+            user_id=current_user.user_id,
+            route="generate-diet",
         )
-    except GeminiUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Diet generation is temporarily unavailable: {exc}")
+    except QuotaExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=exc.message,
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except GeminiUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Diet generation is temporarily unavailable. Please try again shortly.",
+        )
 
     try:
         validated = parse_and_validate_plan(raw, targets)
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=f"Could not generate a valid plan: {exc}")
+    except ValueError:
+        raise HTTPException(
+            status_code=502, detail="Could not generate a valid plan. Please try again."
+        )
 
     return GenerateDietResponse(
         meals=validated.plan.meals,

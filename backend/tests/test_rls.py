@@ -83,16 +83,32 @@ def _rest_headers(token: str) -> dict:
     }
 
 
+def _service_headers() -> dict:
+    from app.core.supabase_admin import service_headers
+
+    return {**service_headers(settings.supabase_service_role_key), "Prefer": "return=representation"}
+
+
 def test_user_can_only_see_own_weight_logs(two_users):
     a, b = two_users["a"], two_users["b"]
 
-    insert_resp = httpx.post(
+    # Weight rows are written by the backend only (the lock-down migration
+    # revoked client INSERT), so seed A's row with the service role...
+    seed_resp = httpx.post(
         f"{settings.supabase_url}/rest/v1/weight_logs",
-        headers=_rest_headers(a["token"]),
+        headers=_service_headers(),
         json={"user_id": a["id"], "weight_kg": 80},
         timeout=15,
     )
-    assert insert_resp.status_code == 201, insert_resp.text
+    assert seed_resp.status_code == 201, seed_resp.text
+    # ...and prove the browser itself can no longer insert one.
+    direct = httpx.post(
+        f"{settings.supabase_url}/rest/v1/weight_logs",
+        headers=_rest_headers(a["token"]),
+        json={"user_id": a["id"], "weight_kg": 1},
+        timeout=15,
+    )
+    assert direct.status_code in (401, 403), direct.text
 
     # User A can see their own row.
     a_view = httpx.get(
@@ -215,7 +231,7 @@ def test_user_cannot_read_another_users_profile_directly(two_users):
 
     create_resp = httpx.post(
         f"{settings.supabase_url}/rest/v1/profiles",
-        headers=_rest_headers(a["token"]),
+        headers=_service_headers(),
         json={
             "id": a["id"],
             "username": f"rlsprofile{uuid.uuid4().hex[:8]}",
@@ -325,12 +341,6 @@ def test_food_items_are_globally_readable_but_only_creator_can_edit_unverified(
 # to approve their own friend request or mint a "verified" food from the
 # browser, even with a perfectly valid JWT of their own.
 # ---------------------------------------------------------------------------
-def _service_headers() -> dict:
-    from app.core.supabase_admin import service_headers
-
-    return {**service_headers(settings.supabase_service_role_key), "Prefer": "return=representation"}
-
-
 def _friendship_status(friendship_id: str) -> str:
     resp = httpx.get(
         f"{settings.supabase_url}/rest/v1/friendships",

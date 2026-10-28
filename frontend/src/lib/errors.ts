@@ -63,6 +63,11 @@ const MESSAGES: Record<ErrorContext, string> = {
  * status code, a response body, or an API path in the returned string. */
 export function friendlyMessage(err: unknown, context: ErrorContext = "generic"): string {
   console.error(`[${context}]`, err);
+  // Two statuses deserve their own wording regardless of where they happen:
+  // rate-limited (the server says to slow down) and timed out.
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 429) return "You’re going a bit fast — please wait a moment and try again.";
+  if (status === 408) return "That’s taking longer than expected. Please try again.";
   return MESSAGES[context];
 }
 

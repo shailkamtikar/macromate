@@ -168,7 +168,7 @@ def _stub_gemini_intent(monkeypatch, payload: dict):
     calls = {"count": 0, "history": None, "prompt": None}
 
     def fake_generate_text(
-        prompt, *, system_instruction=None, history=None, timeout=20, fallback_timeout=None
+        prompt, *, system_instruction=None, history=None, timeout=20, fallback_timeout=None, **_ignored
     ):
         calls["count"] += 1
         calls["history"] = history

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
-from app.core.gemini import GeminiUnavailable, generate_text
+from app.core.gemini import GeminiUnavailable, QuotaExceeded, generate_text
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.ai_food_parser import PARSE_SYSTEM_INSTRUCTION, parse_gemini_food_list
 from app.domain.food_resolution import FoodCandidate, ResolvedFoodItem, resolve_food_mention
@@ -124,18 +124,30 @@ def calculate_foods(
 ) -> CalculateFoodsResponse:
     try:
         raw_response = generate_text(
-            payload.text, system_instruction=PARSE_SYSTEM_INSTRUCTION, timeout=20
+            payload.text,
+            system_instruction=PARSE_SYSTEM_INSTRUCTION,
+            timeout=20,
+            json_mode=True,
+            user_id=current_user.user_id,
+            route="calculate-foods",
         )
-    except GeminiUnavailable as exc:
+    except QuotaExceeded as exc:
         raise HTTPException(
-            status_code=503, detail=f"AI food parsing is temporarily unavailable: {exc}"
+            status_code=429,
+            detail=exc.message,
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    except GeminiUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="AI food parsing is temporarily unavailable. Please try again shortly.",
         )
 
     try:
         parsed = parse_gemini_food_list(raw_response)
-    except ValueError as exc:
+    except ValueError:
         raise HTTPException(
-            status_code=502, detail=f"Could not interpret the AI response: {exc}"
+            status_code=502, detail="Could not interpret the AI response. Please try again."
         )
 
     db = SupabaseAdmin()

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     # Max Gemini calls in flight at once (see app/core/gemini.py).
     ai_max_concurrency: int = 4
+    # Per-user AI limits (see app/core/quota.py). Sized for a free-tier Gemini
+    # key shared by a handful of users: ample for a human, tight for a script.
+    ai_calls_per_minute: int = 8
+    ai_calls_per_day: int = 200
+    record_ai_usage: bool = True
 
     fcm_server_key: str | None = None
 
