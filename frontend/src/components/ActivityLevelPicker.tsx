@@ -2,6 +2,7 @@
 
 import { ActivityLevel } from "@/lib/api";
 import { ACTIVITY_LEVEL_INFO, ACTIVITY_LEVEL_ORDER } from "@/lib/activityLevels";
+import { Icon } from "@/components/Icon";
 
 interface ActivityLevelPickerProps {
   value: ActivityLevel;
@@ -38,7 +39,7 @@ export function ActivityLevelPicker({ value, onChange }: ActivityLevelPickerProp
                 }`}
               >
                 {selected && (
-                  <span className="material-symbols-outlined text-xs text-on-primary" aria-hidden="true">check</span>
+                  <Icon name={"check"} className="text-xs text-on-primary" />
                 )}
               </span>
             </div>

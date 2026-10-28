@@ -7,6 +7,7 @@ import { useSession } from "@/lib/useSession";
 import { ActivityLogger } from "@/components/ActivityLogger";
 import { WeightHistoryChart } from "@/components/WeightHistoryChart";
 import { AchievementsCard } from "@/components/AchievementsCard";
+import { Icon } from "@/components/Icon";
 
 function ComparisonBar({
   label,
@@ -195,7 +196,7 @@ export default function ProgressPage() {
             {report.wins.length > 0 && (
               <section className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-4 shadow-sm">
                 <div className="mb-2 flex items-center gap-1.5 text-primary">
-                  <span className="material-symbols-outlined text-lg" aria-hidden="true">celebration</span>
+                  <Icon name={"celebration"} className="text-lg" />
                   <span className="text-xs font-bold uppercase tracking-wider">Wins</span>
                 </div>
                 <ul className="space-y-1">
@@ -211,7 +212,7 @@ export default function ProgressPage() {
             {report.improvement_areas.length > 0 && (
               <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
                 <div className="mb-2 flex items-center gap-1.5 text-on-surface-variant">
-                  <span className="material-symbols-outlined text-lg" aria-hidden="true">trending_up</span>
+                  <Icon name={"trending_up"} className="text-lg" />
                   <span className="text-xs font-bold uppercase tracking-wider">Where to focus</span>
                 </div>
                 <ul className="space-y-1">

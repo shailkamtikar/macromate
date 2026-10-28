@@ -22,6 +22,7 @@ import {
   servingWeight,
   weightUnitLabel,
 } from "@/lib/servings";
+import { Icon } from "@/components/Icon";
 
 type Tab = "search" | "recent" | "frequent";
 
@@ -424,7 +425,7 @@ export function FoodPicker({
               aria-label="Close food details"
               className="text-on-surface-variant"
             >
-              <span className="material-symbols-outlined text-base" aria-hidden="true">close</span>
+              <Icon name={"close"} className="text-base" />
             </button>
           </div>
 
@@ -506,7 +507,7 @@ export function FoodPicker({
               aria-label="Cancel"
               className="text-on-surface-variant"
             >
-              <span className="material-symbols-outlined text-base" aria-hidden="true">close</span>
+              <Icon name={"close"} className="text-base" />
             </button>
           </div>
           <p className="text-xs text-on-surface-variant">

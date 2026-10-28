@@ -14,6 +14,8 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
+    // Deterministic tests: no animated transitions to wait out.
+    contextOptions: { reducedMotion: "reduce" },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   // Servers are started explicitly by the test runner invocation, not here,

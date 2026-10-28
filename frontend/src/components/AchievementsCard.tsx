@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Achievements } from "@/lib/api";
+import { Icon } from "@/components/Icon";
 
 const MILESTONES = [3, 7, 14, 30];
 const SEEN_MILESTONES_KEY = "macromate:seen-milestones";
@@ -37,9 +38,7 @@ export function StreakChip({ achievements }: { achievements: Achievements }) {
   if (achievements.current_streak_days <= 0) return null;
   return (
     <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-      <span className="material-symbols-outlined text-sm" aria-hidden="true">
-        local_fire_department
-      </span>
+      <Icon name={"local_fire_department"} className="text-sm" />
       {achievements.current_streak_days}-day streak
     </div>
   );
@@ -110,9 +109,7 @@ export function AchievementsCard({ achievements }: { achievements: Achievements 
 
       {achievements.weight_lower_than_last && (
         <p className="mt-1 flex items-center gap-1.5 text-xs text-primary">
-          <span className="material-symbols-outlined text-sm" aria-hidden="true">
-            trending_down
-          </span>
+          <Icon name={"trending_down"} className="text-sm" />
           Weight down {Math.abs(achievements.weight_delta_kg ?? 0)}kg since last entry.
         </p>
       )}

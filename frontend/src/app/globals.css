@@ -2,86 +2,110 @@
 
 /*
  * MacroMate design tokens.
- * Source: Stitch export (design/stitch_macromate_design_system_ui.zip),
- * reconciled per ../../docs/DESIGN_RECONCILIATION.md — do not hand-edit
- * colors here without updating that doc's decision table.
+ *
+ * Dark is the default theme (near-black ground, green accent); light is a warm
+ * off-white. A theme is chosen with <html data-theme="dark|light|system">
+ * (set server-side from a cookie, see layout.tsx / ThemeToggle):
+ *   - no attribute / "dark"  -> dark
+ *   - "light"                -> light
+ *   - "system"               -> follows the OS (prefers-color-scheme)
+ *
+ * Semantic macro colors are constant across the app: protein = indigo,
+ * carbs = amber, fat = rose, water = sky, calories/primary = green.
  */
 :root {
-  --color-surface: #fbf8fc;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f6f2f7;
-  --color-surface-container: #f0edf1;
-  --color-surface-container-high: #eae7eb;
-  --color-on-surface: #1b1b1e;
-  --color-on-surface-variant: #3f493f;
-  --color-outline-variant: #e6e5e2;
+  /* Ground and cards (dark) */
+  --color-surface: #090b0a;
+  --color-surface-container-lowest: #111412;
+  --color-surface-container-low: #151a17;
+  --color-surface-container: #1a201c;
+  --color-surface-container-high: #222923;
+  --color-on-surface: #eef3ef;
+  --color-on-surface-variant: #98a59c;
+  --color-outline-variant: #232a25;
 
-  --color-primary: #15803d;
+  --color-primary: #34d673;
+  --color-on-primary: #04210f;
+  --color-primary-container: #0f3a21;
+  --color-secondary-container: #0f3a21;
+  --color-on-secondary-container: #8cf0b3;
+
+  --color-protein: #8b93ff;
+  --color-carbs: #fbbf24;
+  --color-fat: #fb7185;
+  --color-water: #38bdf8;
+
+  --shadow-card: 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -18px rgb(0 0 0 / 0.7);
+  --glow-primary: 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent),
+    0 24px 70px -28px color-mix(in srgb, var(--color-primary) 38%, transparent);
+
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-card: 1.25rem;
+  --radius-control: 0.75rem;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --color-surface: #f5f6f1;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f6f7f3;
+  --color-surface-container: #eef0ea;
+  --color-surface-container-high: #e5e8e0;
+  --color-on-surface: #111613;
+  --color-on-surface-variant: #55625a;
+  --color-outline-variant: #dfe3da;
+
+  --color-primary: #138a43;
   --color-on-primary: #ffffff;
-  --color-primary-container: #a4f1b2;
-  --color-secondary-container: #a4f1b2;
-  --color-on-secondary-container: #24703e;
+  --color-primary-container: #c9f2d6;
+  --color-secondary-container: #c9f2d6;
+  --color-on-secondary-container: #0f5a2c;
 
   --color-protein: #4f46e5;
   --color-carbs: #d97706;
   --color-fat: #e11d48;
   --color-water: #0284c7;
 
-  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --shadow-card: 0 1px 2px rgb(16 24 20 / 0.05), 0 12px 32px -20px rgb(16 24 20 / 0.18);
+  --glow-primary: 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent),
+    0 24px 60px -30px color-mix(in srgb, var(--color-primary) 30%, transparent);
 
-  --radius-card: 1rem;
-  --radius-control: 0.5rem;
+  color-scheme: light;
 }
 
-/*
- * Dark mode: applies via OS preference by default, or a manual override
- * (data-theme, set by ThemeToggle + localStorage) which always wins.
- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --color-surface: #0f1115;
-    --color-surface-container-lowest: #181b20;
-    --color-surface-container-low: #1c1f26;
-    --color-surface-container: #21252c;
-    --color-surface-container-high: #262b33;
-    --color-on-surface: #f4f4f5;
-    --color-on-surface-variant: #a1a1aa;
-    --color-outline-variant: #2a2f3a;
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --color-surface: #f5f6f1;
+    --color-surface-container-lowest: #ffffff;
+    --color-surface-container-low: #f6f7f3;
+    --color-surface-container: #eef0ea;
+    --color-surface-container-high: #e5e8e0;
+    --color-on-surface: #111613;
+    --color-on-surface-variant: #55625a;
+    --color-outline-variant: #dfe3da;
 
-    --color-primary: #22c55e;
-    --color-on-primary: #052e11;
-    --color-primary-container: #14532d;
-    --color-secondary-container: #14532d;
-    --color-on-secondary-container: #86efac;
+    --color-primary: #138a43;
+    --color-on-primary: #ffffff;
+    --color-primary-container: #c9f2d6;
+    --color-secondary-container: #c9f2d6;
+    --color-on-secondary-container: #0f5a2c;
 
-    --color-protein: #818cf8;
-    --color-carbs: #fbbf24;
-    --color-fat: #fb7185;
-    --color-water: #38bdf8;
+    --color-protein: #4f46e5;
+    --color-carbs: #d97706;
+    --color-fat: #e11d48;
+    --color-water: #0284c7;
+
+    --shadow-card: 0 1px 2px rgb(16 24 20 / 0.05), 0 12px 32px -20px rgb(16 24 20 / 0.18);
+    --glow-primary: 0 0 0 1px color-mix(in srgb, var(--color-primary) 22%, transparent),
+      0 24px 60px -30px color-mix(in srgb, var(--color-primary) 30%, transparent);
+
+    color-scheme: light;
   }
-}
-
-:root[data-theme="dark"] {
-  --color-surface: #0f1115;
-  --color-surface-container-lowest: #181b20;
-  --color-surface-container-low: #1c1f26;
-  --color-surface-container: #21252c;
-  --color-surface-container-high: #262b33;
-  --color-on-surface: #f4f4f5;
-  --color-on-surface-variant: #a1a1aa;
-  --color-outline-variant: #2a2f3a;
-
-  --color-primary: #22c55e;
-  --color-on-primary: #052e11;
-  --color-primary-container: #14532d;
-  --color-secondary-container: #14532d;
-  --color-on-secondary-container: #86efac;
-
-  --color-protein: #818cf8;
-  --color-carbs: #fbbf24;
-  --color-fat: #fb7185;
-  --color-water: #38bdf8;
 }
 
 @theme inline {
@@ -107,6 +131,8 @@
 
   --font-display: var(--font-display);
   --font-body: var(--font-body);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
 
   --radius-card: var(--radius-card);
   --radius-control: var(--radius-control);
@@ -116,19 +142,26 @@ body {
   background: var(--color-surface);
   color: var(--color-on-surface);
   font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-.material-symbols-outlined {
-  font-family: "Material Symbols Outlined";
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+/* One consistent, visible keyboard focus ring everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.input:focus-visible {
+  outline: none;
+}
+
+/* Numbers that change (calories, water) must not make the layout jitter. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
 @layer components {
@@ -137,14 +170,48 @@ body {
     border: 1px solid var(--color-outline-variant);
     background: var(--color-surface-container-low);
     color: var(--color-on-surface);
-    padding: 0.5rem 0.75rem;
+    padding: 0.55rem 0.8rem;
     font-size: 0.875rem;
     font-family: var(--font-body);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .input::placeholder {
+    color: color-mix(in srgb, var(--color-on-surface-variant) 70%, transparent);
   }
   .input:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  }
+
+  /* Small uppercase mono label that sits above a headline or section. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-on-surface-variant);
+  }
+
+  /* A card: hairline border, soft depth. */
+  .card {
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-outline-variant);
+    background: var(--color-surface-container-lowest);
+    box-shadow: var(--shadow-card);
+  }
+  .card-glow {
+    box-shadow: var(--glow-primary), var(--shadow-card);
+  }
+
+  /* Faint technical grid used behind hero areas. */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--color-on-surface) 6%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--color-on-surface) 6%, transparent) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
   }
 }
 
@@ -193,12 +260,37 @@ body {
 }
 @media (prefers-reduced-motion: no-preference) {
   @keyframes skeleton-sweep {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
   }
   .skeleton {
-    background-image: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-on-surface) 7%, transparent) 50%, transparent 100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-on-surface) 7%, transparent) 50%,
+      transparent 100%
+    );
     background-size: 200% 100%;
     animation: skeleton-sweep 1.6s linear infinite;
+  }
+}
+
+/* Slow ambient drift for hero glows (landing). */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(2%, -3%, 0) scale(1.06);
+    }
+  }
+  .drift {
+    animation: drift 14s ease-in-out infinite;
   }
 }

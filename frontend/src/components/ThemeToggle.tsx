@@ -7,40 +7,30 @@ type ThemeChoice = "light" | "dark" | "system";
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
+/** Dark is the default; the choice (including "system") is stored in a
+ * cookie, which is what lets the *server* render the right theme on the next
+ * request (see layout.tsx) -- localStorage alone can't do that. */
 function applyTheme(choice: ThemeChoice) {
-  if (choice === "system") {
-    document.documentElement.removeAttribute("data-theme");
-    document.cookie = `${THEME_COOKIE_NAME}=; path=/; max-age=0; samesite=lax`;
-    try {
-      localStorage.removeItem(THEME_STORAGE_KEY);
-    } catch {
-      // Private-browsing / storage-blocked — theme just won't persist.
-    }
-  } else {
-    document.documentElement.setAttribute("data-theme", choice);
-    // The cookie is what makes the *next* server render already agree with
-    // this choice (see layout.tsx) — localStorage alone can't do that,
-    // since the server can't read it.
-    document.cookie = `${THEME_COOKIE_NAME}=${choice}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`;
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, choice);
-    } catch {
-      // Same as above — the toggle still works for this page load.
-    }
+  document.documentElement.setAttribute("data-theme", choice);
+  document.cookie = `${THEME_COOKIE_NAME}=${choice}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, choice);
+  } catch {
+    // Private-browsing / storage-blocked: the toggle still works for this page load.
   }
 }
 
+function currentTheme(): ThemeChoice {
+  const attr = typeof document !== "undefined" ? document.documentElement.getAttribute("data-theme") : null;
+  return attr === "light" || attr === "system" ? attr : "dark";
+}
+
 export function ThemeToggle() {
-  const [choice, setChoice] = useState<ThemeChoice>("system");
+  const [choice, setChoice] = useState<ThemeChoice>("dark");
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(THEME_STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reads a synchronous local API, not fetched data
-      if (stored === "dark" || stored === "light") setChoice(stored);
-    } catch {
-      // Leave default "system".
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the attribute the server already rendered
+    setChoice(currentTheme());
   }, []);
 
   function handleChange(next: ThemeChoice) {
@@ -49,16 +39,17 @@ export function ThemeToggle() {
   }
 
   return (
-    <div className="flex gap-2">
-      {(["light", "system", "dark"] as ThemeChoice[]).map((option) => (
+    <div className="flex gap-2" role="group" aria-label="Theme">
+      {(["dark", "light", "system"] as ThemeChoice[]).map((option) => (
         <button
           key={option}
           type="button"
           onClick={() => handleChange(option)}
-          className={`flex-1 rounded-[var(--radius-control)] px-3 py-2 text-sm font-semibold capitalize ${
+          aria-pressed={choice === option}
+          className={`flex-1 rounded-[var(--radius-control)] px-3 py-2 text-sm font-semibold capitalize transition-colors ${
             choice === option
               ? "bg-primary text-on-primary"
-              : "bg-surface-container text-on-surface-variant"
+              : "bg-surface-container text-on-surface-variant hover:text-on-surface"
           }`}
         >
           {option}

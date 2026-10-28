@@ -11,6 +11,7 @@ import {
   fetchNotificationSettings,
 } from "@/lib/api";
 import { localDateIso } from "@/lib/date";
+import { Icon } from "@/components/Icon";
 
 // Deterministic triggers (logging reminder / streak-at-risk / macro nudge)
 // change slowly across a day -- 5 minutes is frequent enough to feel timely
@@ -195,9 +196,7 @@ export function NotificationPoller() {
         aria-label="Dismiss notification"
         className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant"
       >
-        <span className="material-symbols-outlined text-base" aria-hidden="true">
-          close
-        </span>
+        <Icon name={"close"} className="text-base" />
       </button>
     </div>
   );

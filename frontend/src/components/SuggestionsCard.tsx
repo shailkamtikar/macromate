@@ -1,5 +1,6 @@
 import { SuggestedFood, SuggestionsResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import { Icon } from "@/components/Icon";
 
 /** "What to eat next". Loads independently of the diary (see TodayPage), so
  * it has its own loading and error states and never blocks the page. */
@@ -18,7 +19,7 @@ export function SuggestionsCard({
 }) {
   const header = (
     <div className="mb-1 flex items-center gap-1.5 text-primary">
-      <span className="material-symbols-outlined text-lg" aria-hidden="true">psychology</span>
+      <Icon name={"psychology"} className="text-lg" />
       <span className="text-xs font-bold uppercase tracking-wider">What to eat next</span>
     </div>
   );

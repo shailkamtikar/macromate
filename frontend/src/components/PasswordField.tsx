@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { Icon } from "@/components/Icon";
 
 interface PasswordFieldProps {
   label: string;
@@ -51,9 +52,7 @@ export function PasswordField({
           aria-pressed={visible}
           className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-on-surface-variant hover:text-on-surface"
         >
-          <span className="material-symbols-outlined text-lg" aria-hidden="true">
-            {visible ? "visibility_off" : "visibility"}
-          </span>
+          <Icon name={visible ? "visibility_off" : "visibility"} className="text-lg" />
         </button>
       </div>
     </div>

@@ -30,6 +30,7 @@ import {
   unitOptions,
   weightUnitLabel,
 } from "@/lib/servings";
+import { Icon } from "@/components/Icon";
 
 type RowStatus = "resolved" | "ambiguous" | "unresolved" | "logged";
 
@@ -579,7 +580,7 @@ function ReviewRowCard({
             aria-label={`Remove "${row.raw_phrase}" from review`}
             className="flex-shrink-0 text-on-surface-variant hover:text-fat"
           >
-            <span className="material-symbols-outlined text-base" aria-hidden="true">close</span>
+            <Icon name={"close"} className="text-base" />
           </button>
         )}
       </div>

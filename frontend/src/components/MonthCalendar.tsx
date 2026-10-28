@@ -12,6 +12,7 @@ import {
   monthStartIso,
 } from "@/lib/date";
 import { describeDay, statusDotClass } from "@/components/dayDisplay";
+import { Icon } from "@/components/Icon";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -92,9 +93,7 @@ export function MonthCalendar({
             aria-label="Previous month"
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-surface-container"
           >
-            <span className="material-symbols-outlined text-xl" aria-hidden="true">
-              chevron_left
-            </span>
+            <Icon name={"chevron_left"} className="text-xl" />
           </button>
           <p className="text-sm font-semibold text-on-surface" aria-live="polite">
             {formatMonthYear(month)}
@@ -106,9 +105,7 @@ export function MonthCalendar({
             aria-label="Next month"
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-surface-container disabled:opacity-30"
           >
-            <span className="material-symbols-outlined text-xl" aria-hidden="true">
-              chevron_right
-            </span>
+            <Icon name={"chevron_right"} className="text-xl" />
           </button>
         </div>
 

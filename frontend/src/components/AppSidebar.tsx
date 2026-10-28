@@ -11,6 +11,7 @@ import { GlassSizesManager } from "@/components/GlassSizesManager";
 import { NotificationsManager } from "@/components/NotificationsManager";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import ProfilePage from "@/app/profile/page";
+import { Icon } from "@/components/Icon";
 
 type SectionKey =
   | "profile"
@@ -200,9 +201,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
                     : "text-on-surface-variant hover:bg-surface-container-low"
                 } ${effectiveCollapsed ? "justify-center" : ""}`}
               >
-                <span className="material-symbols-outlined text-xl" aria-hidden>
-                  {item.icon}
-                </span>
+                <Icon name={item.icon} className="text-xl" />
                 {!effectiveCollapsed && <span>{item.label}</span>}
               </Link>
             );
@@ -233,15 +232,11 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
                   }`}
                 >
                   <span className="flex items-center gap-3">
-                    <span className="material-symbols-outlined text-xl" aria-hidden>
-                      {section.icon}
-                    </span>
+                    <Icon name={section.icon} className="text-xl" />
                     {!effectiveCollapsed && <span>{section.label}</span>}
                   </span>
                   {!effectiveCollapsed && (
-                    <span className="material-symbols-outlined text-base" aria-hidden>
-                      {isOpen ? "expand_less" : "expand_more"}
-                    </span>
+                    <Icon name={isOpen ? "expand_less" : "expand_more"} className="text-base" />
                   )}
                 </button>
                 {isOpen && (
@@ -266,9 +261,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
               effectiveCollapsed ? "justify-center" : ""
             }`}
           >
-            <span className="material-symbols-outlined text-xl" aria-hidden>
-              logout
-            </span>
+            <Icon name={"logout"} className="text-xl" />
             {!effectiveCollapsed && <span>Log out</span>}
           </button>
         </div>
@@ -288,7 +281,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
         aria-label="Menu"
         className="fixed left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest text-on-surface-variant shadow-md lg:hidden"
       >
-        <span className="material-symbols-outlined text-xl" aria-hidden="true">menu</span>
+        <Icon name={"menu"} className="text-xl" />
       </button>
 
       {/* Desktop persistent rail */}
@@ -312,9 +305,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-low"
           >
-            <span className="material-symbols-outlined text-lg" aria-hidden>
-              {collapsed ? "chevron_right" : "chevron_left"}
-            </span>
+            <Icon name={collapsed ? "chevron_right" : "chevron_left"} className="text-lg" />
           </button>
         </div>
         {renderRail(collapsed, "desktop")}
@@ -353,7 +344,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
               aria-label="Close menu"
               className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant"
             >
-              <span className="material-symbols-outlined text-lg" aria-hidden="true">close</span>
+              <Icon name={"close"} className="text-lg" />
             </button>
           </div>
           {renderRail(false, "mobile")}
@@ -389,7 +380,7 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
               aria-label="Close profile & settings"
               className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant"
             >
-              <span className="material-symbols-outlined text-lg" aria-hidden="true">close</span>
+              <Icon name={"close"} className="text-lg" />
             </button>
           </div>
           <div className="flex-1">{fullEditorOpen && <ProfilePage />}</div>

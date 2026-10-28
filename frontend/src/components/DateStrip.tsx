@@ -6,6 +6,7 @@ import { fetchDaysSummary } from "@/lib/api";
 import { addDays, parseIso, startOfWeekIso, weekDays } from "@/lib/date";
 import { MonthCalendar } from "@/components/MonthCalendar";
 import { describeDay, statusDotClass } from "@/components/dayDisplay";
+import { Icon } from "@/components/Icon";
 
 const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 
@@ -46,9 +47,7 @@ export function DateStrip({
           aria-label="Previous week"
           className="flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container"
         >
-          <span className="material-symbols-outlined text-xl" aria-hidden="true">
-            chevron_left
-          </span>
+          <Icon name={"chevron_left"} className="text-xl" />
         </button>
         <button
           type="button"
@@ -58,9 +57,7 @@ export function DateStrip({
           data-testid="open-month-calendar"
           className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-on-surface-variant hover:bg-surface-container"
         >
-          <span className="material-symbols-outlined text-base" aria-hidden="true">
-            calendar_month
-          </span>
+          <Icon name={"calendar_month"} className="text-base" />
           {parseIso(weekStart).toLocaleDateString(undefined, { month: "short", day: "numeric" })} –{" "}
           {parseIso(weekEnd).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
         </button>
@@ -71,9 +68,7 @@ export function DateStrip({
           aria-label="Next week"
           className="flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container disabled:opacity-30"
         >
-          <span className="material-symbols-outlined text-xl" aria-hidden="true">
-            chevron_right
-          </span>
+          <Icon name={"chevron_right"} className="text-xl" />
         </button>
       </div>
 

@@ -16,6 +16,7 @@ import {
 import { friendlyMessage } from "@/lib/errors";
 import { supabase } from "@/lib/supabaseClient";
 import { useSession } from "@/lib/useSession";
+import { Icon } from "@/components/Icon";
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: "Breakfast",
@@ -246,9 +247,7 @@ export default function FriendsPage() {
                     {entry.is_self && <span className="text-xs text-primary">(you)</span>}
                     {entry.current_streak_days > 0 && (
                       <span className="flex items-center gap-0.5 text-xs text-on-surface-variant">
-                        <span className="material-symbols-outlined text-sm" aria-hidden="true">
-                          local_fire_department
-                        </span>
+                        <Icon name={"local_fire_department"} className="text-sm" />
                         {entry.current_streak_days}
                       </span>
                     )}

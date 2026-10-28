@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_ITEMS, SHELL_HIDDEN_ROUTES } from "@/lib/navItems";
+import { Icon } from "@/components/Icon";
 
 /** Primary navigation for narrow viewports. On desktop/laptop widths the
  * persistent AppSidebar rail already provides this same navigation (see
@@ -27,9 +28,7 @@ export function BottomNav() {
                 active ? "text-primary" : "text-on-surface-variant"
               }`}
             >
-              <span className="material-symbols-outlined text-xl" aria-hidden>
-                {item.icon}
-              </span>
+              <Icon name={item.icon} className="text-xl" />
               <span className="w-full truncate text-center text-[11px] font-medium">{item.label}</span>
             </Link>
           );

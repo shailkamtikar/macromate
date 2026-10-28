@@ -11,6 +11,7 @@ import {
   quantityToAmount,
   servingWeight,
 } from "@/lib/servings";
+import { Icon } from "@/components/Icon";
 
 interface DiaryMealProps {
   meal: MealType;
@@ -187,7 +188,7 @@ export function DiaryMeal({
                   aria-label={`Edit ${log.food_name}`}
                   className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container disabled:opacity-40"
                 >
-                  <span className="material-symbols-outlined text-base" aria-hidden="true">edit</span>
+                  <Icon name={"edit"} className="text-base" />
                 </button>
                 <button
                   type="button"
@@ -196,7 +197,7 @@ export function DiaryMeal({
                   aria-label={`Remove ${log.food_name}`}
                   className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-fat hover:bg-fat/10 disabled:opacity-60"
                 >
-                  <span className="material-symbols-outlined text-base" aria-hidden="true">delete</span>
+                  <Icon name={"delete"} className="text-base" />
                 </button>
               </li>
             ),
@@ -210,14 +211,14 @@ export function DiaryMeal({
           onClick={() => onAddFood(meal)}
           className="flex items-center gap-1 text-xs font-semibold text-primary underline-offset-2 hover:underline"
         >
-          <span className="material-symbols-outlined text-sm" aria-hidden="true">add</span>
+          <Icon name={"add"} className="text-sm" />
           Add food to {MEAL_LABELS[meal].toLowerCase()}
         </button>
         <a
           href={`/calculate?meal=${meal}`}
           className="flex items-center gap-1 text-xs font-semibold text-on-surface-variant underline-offset-2 hover:underline"
         >
-          <span className="material-symbols-outlined text-sm" aria-hidden="true">auto_awesome</span>
+          <Icon name={"auto_awesome"} className="text-sm" />
           Calculate with AI
         </a>
       </div>

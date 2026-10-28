@@ -1,6 +1,7 @@
 "use client";
 
 import { Goal } from "@/lib/api";
+import { Icon } from "@/components/Icon";
 
 interface RatePickerProps {
   goal: Goal;
@@ -58,7 +59,7 @@ export function RatePicker({ goal, value, onChange }: RatePickerProps) {
                 }`}
               >
                 {selected && (
-                  <span className="material-symbols-outlined text-xs text-on-primary" aria-hidden="true">check</span>
+                  <Icon name={"check"} className="text-xs text-on-primary" />
                 )}
               </span>
             </div>

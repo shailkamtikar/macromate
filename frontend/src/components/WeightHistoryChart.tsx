@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { Icon } from "@/components/Icon";
 
 interface WeightPoint {
   date: string;
@@ -135,9 +136,7 @@ export function WeightHistoryChart({ userId }: { userId: string }) {
             trend < 0 ? "text-primary" : trend > 0 ? "text-fat" : "text-on-surface-variant"
           }`}
         >
-          <span className="material-symbols-outlined text-sm" aria-hidden="true">
-            {trend < 0 ? "trending_down" : trend > 0 ? "trending_up" : "trending_flat"}
-          </span>
+          <Icon name={trend < 0 ? "trending_down" : trend > 0 ? "trending_up" : "trending_flat"} className="text-sm" />
           {trend === 0 ? "Stable" : `${trend > 0 ? "+" : ""}${trend.toFixed(1)}kg`}
         </span>
       </div>
