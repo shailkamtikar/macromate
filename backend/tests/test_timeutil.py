@@ -50,3 +50,26 @@ def test_day_bounds_utc_for_utc_user_matches_calendar_midnight():
     start, end = day_bounds_utc(date(2026, 6, 15), "UTC")
     assert start == datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc)
     assert end == datetime(2026, 6, 16, 0, 0, tzinfo=timezone.utc)
+
+
+def test_logged_at_for_date_rules():
+    from datetime import date, datetime, timedelta, timezone
+
+    import pytest
+
+    from app.domain.timeutil import local_today, logged_at_for_date
+
+    tz = "Asia/Kolkata"
+    today = local_today(tz)
+    assert logged_at_for_date(None, tz) == (None, today)
+    assert logged_at_for_date(today, tz) == (None, today)
+
+    past = today - timedelta(days=3)
+    stamp, resolved = logged_at_for_date(past, tz)
+    assert resolved == past
+    # 12:00 IST is 06:30 UTC on the same date.
+    parsed = datetime.fromisoformat(stamp)
+    assert parsed.astimezone(timezone.utc).hour == 6 and parsed.astimezone(timezone.utc).minute == 30
+
+    with pytest.raises(ValueError):
+        logged_at_for_date(today + timedelta(days=1), tz)

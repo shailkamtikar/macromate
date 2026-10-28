@@ -242,3 +242,62 @@ def test_requires_authentication_and_never_leaks_between_users(client, world):
     assert client.get(f"/api/days/summary?start={d3}&end={d3}").status_code == 401
     # User B has no profile yet -> told to onboard, never shown A's data.
     assert client.get(f"/api/days/{d3}", headers=world["b"]).status_code == 404
+
+
+def test_backfilling_food_and_water_lands_on_the_chosen_day_only(client, world):
+    db = SupabaseAdmin()
+    food = db.insert(
+        "food_items",
+        {
+            "name": f"__backfill_{uuid.uuid4().hex[:8]}",
+            "serving_description": "1 serving",
+            "calories": 200,
+            "protein_g": 10,
+            "carbs_g": 20,
+            "fat_g": 5,
+            "verified": True,
+        },
+    )[0]
+    try:
+        target = (world["today"] - timedelta(days=5)).isoformat()
+        logged = client.post(
+            "/api/food-logs",
+            headers=world["a"],
+            json={"food_item_id": food["id"], "meal_type": "snack", "quantity": 2, "log_date": target},
+        )
+        assert logged.status_code == 200, logged.text
+        water = client.post(
+            "/api/water-logs", headers=world["a"], json={"volume_ml": 500, "log_date": target}
+        )
+        assert water.status_code == 200, water.text
+
+        day = client.get(f"/api/days/{target}", headers=world["a"]).json()
+        assert day["consumed"]["calories"] == 400
+        assert day["water"]["total_ml"] == 500
+        today = client.get(f"/api/days/{world['today'].isoformat()}", headers=world["a"]).json()
+        assert today["consumed"]["calories"] == 0  # nothing leaked onto today
+
+        # Edit and delete work on past days too (by id, no date restriction).
+        patched = client.patch(
+            f"/api/food-logs/{logged.json()['id']}", headers=world["a"], json={"meal_type": "dinner"}
+        )
+        assert patched.status_code == 200 and patched.json()["meal_type"] == "dinner"
+
+        # Undo one container on the past day.
+        removed = client.post(
+            "/api/water-logs/remove", headers=world["a"], json={"volume_ml": 500, "log_date": target}
+        )
+        assert removed.status_code == 200 and removed.json()["total_ml"] == 0
+
+        assert client.delete(f"/api/food-logs/{logged.json()['id']}", headers=world["a"]).status_code == 204
+    finally:
+        db._request("DELETE", "food_logs", params={"food_item_id": f"eq.{food['id']}"})
+        db._request("DELETE", "food_items", params={"id": f"eq.{food['id']}"})
+
+
+def test_backfill_rejects_future_dates(client, world):
+    future = (world["today"] + timedelta(days=1)).isoformat()
+    water = client.post(
+        "/api/water-logs", headers=world["a"], json={"volume_ml": 250, "log_date": future}
+    )
+    assert water.status_code == 422

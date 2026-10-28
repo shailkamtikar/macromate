@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
 from app.core.supabase_admin import SupabaseAdmin
-from app.domain.timeutil import day_bounds_utc, local_today
+from app.domain.timeutil import day_bounds_utc, local_today, logged_at_for_date
 from app.domain.water import plan_water_removal
 
 router = APIRouter(prefix="/api", tags=["water"])
@@ -30,6 +30,9 @@ class WaterLogOut(BaseModel):
 
 class LogWaterRequest(BaseModel):
     volume_ml: float = Field(gt=0, le=10000)
+    # The user's local calendar date (calendar backfill) -- same rules as
+    # food logs: omitted/today = now, past = local noon, future = rejected.
+    log_date: date | None = None
 
 
 class WaterSummaryResponse(BaseModel):
@@ -108,10 +111,19 @@ def list_water_logs(
 @router.post("/water-logs", response_model=WaterLogOut)
 def log_water(payload: LogWaterRequest, current_user: CurrentUserDep) -> WaterLogOut:
     db = SupabaseAdmin()
-    row = db.insert(
-        "water_logs",
-        {"user_id": current_user.user_id, "volume_ml": payload.volume_ml},
-    )[0]
+    data = {"user_id": current_user.user_id, "volume_ml": payload.volume_ml}
+    if payload.log_date is not None:
+        profiles = db.select(
+            "profiles", {"id": f"eq.{current_user.user_id}", "select": "timezone"}
+        )
+        tz_name = profiles[0].get("timezone") if profiles else None
+        try:
+            logged_at, _ = logged_at_for_date(payload.log_date, tz_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if logged_at is not None:
+            data["logged_at"] = logged_at
+    row = db.insert("water_logs", data)[0]
     return WaterLogOut(**row)
 
 
@@ -129,7 +141,7 @@ def remove_water(
     stays correct.
     """
     db = SupabaseAdmin()
-    rows = _day_water_rows(db, current_user.user_id, None)
+    rows = _day_water_rows(db, current_user.user_id, payload.log_date)
     plan = plan_water_removal(rows, payload.volume_ml)
 
     for log_id in plan.delete_ids:
@@ -148,7 +160,7 @@ def remove_water(
             {"volume_ml": remaining_ml},
         )
 
-    return _summarize(_day_water_rows(db, current_user.user_id, None))
+    return _summarize(_day_water_rows(db, current_user.user_id, payload.log_date))
 
 
 @router.delete("/water-logs/{water_log_id}", status_code=204)

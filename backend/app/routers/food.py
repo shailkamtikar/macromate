@@ -12,7 +12,7 @@ from app.domain.food import (
     parse_serving_weight,
 )
 from app.domain.food_resolution import get_or_create_personal_food
-from app.domain.timeutil import day_bounds_utc, local_today
+from app.domain.timeutil import day_bounds_utc, local_today, logged_at_for_date
 
 router = APIRouter(prefix="/api", tags=["food"])
 
@@ -117,6 +117,10 @@ class LogFoodRequest(BaseModel):
     ai_estimate: AiEstimateInput | None = None
     meal_type: str = Field(pattern=MEAL_TYPE_PATTERN)
     quantity: float = Field(gt=0)
+    # The user's local calendar date this entry belongs to (calendar
+    # backfill). Omitted/today = now; a past date is stamped at local noon;
+    # a future date is rejected.
+    log_date: date | None = None
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> "LogFoodRequest":
@@ -311,6 +315,17 @@ def create_food(
 def log_food(payload: LogFoodRequest, current_user: CurrentUserDep) -> FoodLogOut:
     db = SupabaseAdmin()
 
+    logged_at = None
+    if payload.log_date is not None:
+        profiles = db.select(
+            "profiles", {"id": f"eq.{current_user.user_id}", "select": "timezone"}
+        )
+        tz_name = profiles[0].get("timezone") if profiles else None
+        try:
+            logged_at, _ = logged_at_for_date(payload.log_date, tz_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
     if payload.ai_estimate is not None:
         # Back the log with a real food_items row so quantity-scaling and
         # the immutable-snapshot machinery below stay identical to every
@@ -353,21 +368,21 @@ def log_food(payload: LogFoodRequest, current_user: CurrentUserDep) -> FoodLogOu
         quantity=payload.quantity,
     )
 
-    row = db.insert(
-        "food_logs",
-        {
-            # Server-derived, never trust a client-supplied user_id.
-            "user_id": current_user.user_id,
-            "food_item_id": food_item["id"],
-            "meal_type": payload.meal_type,
-            "quantity": payload.quantity,
-            "calories": snapshot.calories,
-            "protein_g": snapshot.protein_g,
-            "carbs_g": snapshot.carbs_g,
-            "fat_g": snapshot.fat_g,
-            "source": source,
-        },
-    )[0]
+    log_row = {
+        # Server-derived, never trust a client-supplied user_id.
+        "user_id": current_user.user_id,
+        "food_item_id": food_item["id"],
+        "meal_type": payload.meal_type,
+        "quantity": payload.quantity,
+        "calories": snapshot.calories,
+        "protein_g": snapshot.protein_g,
+        "carbs_g": snapshot.carbs_g,
+        "fat_g": snapshot.fat_g,
+        "source": source,
+    }
+    if logged_at is not None:
+        log_row["logged_at"] = logged_at
+    row = db.insert("food_logs", log_row)[0]
 
     invalidate_user(current_user.user_id, "suggestions")
     return _food_log_out(row, food_item)

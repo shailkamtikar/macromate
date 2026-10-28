@@ -34,6 +34,26 @@ def day_bounds_utc(local_date: date, tz_name: str | None) -> tuple[datetime, dat
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
+def logged_at_for_date(
+    log_date: date | None, tz_name: str | None
+) -> tuple[str | None, date]:
+    """(logged_at ISO string or None, resolved local date) for a log made on
+    `log_date` in the user's timezone.
+
+    None means "use the database default (now)" -- returned when no date was
+    given or it is today, so ordinary logging is unchanged. A past date is
+    stamped at 12:00 local that day: midday is never near a midnight/DST
+    boundary, so the entry reliably lands on the chosen local day.
+    Raises ValueError for a future date (nothing can be logged ahead)."""
+    today = local_today(tz_name)
+    if log_date is None or log_date == today:
+        return None, today
+    if log_date > today:
+        raise ValueError("Can't log food or water for a future date")
+    noon_local = datetime.combine(log_date, time(12, 0), tzinfo=resolve_timezone(tz_name))
+    return noon_local.astimezone(timezone.utc).isoformat(), log_date
+
+
 def infer_meal_type(tz_name: str | None) -> str:
     """Same time-of-day buckets the frontend already uses (see
     frontend/src/lib/servings.ts inferMealType) -- used when the Coach's
