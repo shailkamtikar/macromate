@@ -1,0 +1,29 @@
+"""Marks every test module that talks to real Supabase or Gemini as `live`.
+
+`uv run pytest -m "not live"` runs only the pure/deterministic tests (used by
+CI); `uv run pytest -m live` runs the rest against whatever Supabase project
+`backend/.env` points at -- which must be the TEST project, never production.
+"""
+
+from pathlib import Path
+
+import pytest
+
+_LIVE_MARKERS = (
+    "supabase_service_role_key",
+    "SupabaseAdmin",
+    "supabase_url",
+    "gemini_api_key",
+    "GEMINI",
+)
+
+
+def pytest_collection_modifyitems(items):
+    cache: dict[Path, bool] = {}
+    for item in items:
+        path = Path(str(item.fspath))
+        if path not in cache:
+            text = path.read_text(encoding="utf-8")
+            cache[path] = any(marker in text for marker in _LIVE_MARKERS)
+        if cache[path]:
+            item.add_marker(pytest.mark.live)

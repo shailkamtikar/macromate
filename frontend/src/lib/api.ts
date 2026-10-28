@@ -1,5 +1,10 @@
 import { getAccessToken } from "@/lib/SessionProvider";
 
+if (process.env.NODE_ENV === "production" && !process.env.NEXT_PUBLIC_API_URL) {
+  // A production build silently falling back to localhost would call the
+  // visitor's own machine -- fail the build loudly instead.
+  throw new Error("NEXT_PUBLIC_API_URL must be set for production builds");
+}
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type BiologicalSex = "male" | "female";
