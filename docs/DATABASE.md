@@ -62,3 +62,15 @@ sharing a date-only prefix like `20260909_0001_x.sql` /
 first one's bookkeeping row gets recorded (this happened once during
 initial setup and was manually reconciled; see git history on this file's
 first version for the incident).
+
+## Upgrade migrations (October 2026)
+
+Applied to the test project and **prepared for production** — see [`PRODUCTION_MIGRATIONS.md`](PRODUCTION_MIGRATIONS.md) for the order and rollbacks.
+
+- `…090000_food_logs_user_food_idx` — index `(user_id, food_item_id, logged_at desc)`.
+- `…100000_daily_targets` (+ `…100100` flag) — per-day target history written by a trigger on `profiles`; powers the calendar's "targets that were active that day".
+- `…110000_rls_friendships_food_items` — addressee-only friend responses; clients can't create/promote verified foods; unique personal AI-estimate food per owner/name.
+- `…120000_lock_client_profile_and_weight_writes` — profile targets and weight logs are written only by the backend (run **after** deploying the new app).
+- `…130000_ai_usage` — AI call audit (model, tokens, latency) and the source of the per-user daily limit.
+
+Rollback SQL for each lives in `backend/supabase/rollbacks/`.
