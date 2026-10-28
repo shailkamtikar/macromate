@@ -78,6 +78,37 @@ create trigger food_items_protect_provenance
 -- get_or_create_personal_food reads then inserts, so two simultaneous logs of
 -- the same estimate could create duplicates. One personal AI-estimate food
 -- per (owner, case-insensitive name).
+--
+-- Real data already contains such duplicates, so merge them first: keep the
+-- OLDEST row of each group, point every log (and report) at it, delete the
+-- rest. Each food_log keeps its own immutable nutrition snapshot, so no
+-- logged calories or macros change.
+create temp table _food_dupes on commit drop as
+select id, keep_id
+from (
+  select id,
+         row_number() over w as rn,
+         first_value(id) over w as keep_id
+  from public.food_items
+  where is_ai_estimate
+  window w as (partition by created_by, lower(name) order by created_at, id)
+) ranked
+where rn > 1;
+
+update public.food_logs l
+   set food_item_id = d.keep_id
+  from _food_dupes d
+ where l.food_item_id = d.id;
+
+update public.food_item_reports r
+   set food_item_id = d.keep_id
+  from _food_dupes d
+ where r.food_item_id = d.id;
+
+delete from public.food_items f
+ using _food_dupes d
+ where f.id = d.id;
+
 create unique index if not exists food_items_personal_ai_estimate_unique
   on public.food_items (created_by, lower(name))
   where is_ai_estimate;
