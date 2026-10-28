@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
+from app.core.parallel import run_parallel
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.achievements import STREAK_LOOKBACK_DAYS, build_achievements
 from app.domain.timeutil import day_bounds_utc, local_today, utc_timestamp_to_local_date
@@ -32,13 +33,20 @@ def get_achievements(current_user: CurrentUserDep) -> AchievementsOut:
 
     today = local_today(tz_name)
     lookback_start, _ = day_bounds_utc(today - timedelta(days=STREAK_LOOKBACK_DAYS), tz_name)
-    food_logs = db.select(
-        "food_logs",
-        {
-            "user_id": f"eq.{current_user.user_id}",
-            "logged_at": f"gte.{lookback_start.isoformat()}",
-            "select": "logged_at,calories,protein_g,carbs_g,fat_g",
-        },
+    # Food logs (streak window) and recent weights are independent reads.
+    food_logs, weight_rows = run_parallel(
+        lambda: db.select(
+            "food_logs",
+            {
+                "user_id": f"eq.{current_user.user_id}",
+                "logged_at": f"gte.{lookback_start.isoformat()}",
+                "select": "logged_at,calories,protein_g,carbs_g,fat_g",
+            },
+        ),
+        lambda: db.select(
+            "weight_logs",
+            {"user_id": f"eq.{current_user.user_id}", "order": "logged_at.asc", "limit": "10"},
+        ),
     )
     logged_dates = {
         utc_timestamp_to_local_date(f["logged_at"], tz_name) for f in food_logs
@@ -57,10 +65,6 @@ def get_achievements(current_user: CurrentUserDep) -> AchievementsOut:
         "fat_g": sum(f["fat_g"] for f in today_logs),
     }
 
-    weight_rows = db.select(
-        "weight_logs",
-        {"user_id": f"eq.{current_user.user_id}", "order": "logged_at.asc", "limit": "10"},
-    )
     recent_weights = [
         (utc_timestamp_to_local_date(w["logged_at"], tz_name), w["weight_kg"])
         for w in weight_rows

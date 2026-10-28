@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
+from app.core.parallel import run_parallel
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.achievements import calculate_logging_streak
 from app.domain.notifications import NotificationTrigger, evaluate_triggers
@@ -106,12 +107,16 @@ def check_triggers_now(current_user: CurrentUserDep) -> list[TriggerOut]:
     Useful for demonstrating/testing the trigger logic against real data
     even without FCM configured."""
     db = SupabaseAdmin()
-    profiles = db.select("profiles", {"id": f"eq.{current_user.user_id}", "select": "*"})
+    profiles, settings_rows = run_parallel(
+        lambda: db.select("profiles", {"id": f"eq.{current_user.user_id}", "select": "*"}),
+        lambda: db.select(
+            "notification_settings", {"user_id": f"eq.{current_user.user_id}", "select": "*"}
+        ),
+    )
     if not profiles:
         raise HTTPException(status_code=404, detail="Complete onboarding first")
     profile = profiles[0]
 
-    settings_rows = db.select("notification_settings", {"user_id": f"eq.{current_user.user_id}", "select": "*"})
     settings = settings_rows[0] if settings_rows else _DEFAULTS.model_dump()
 
     tz_name = profile.get("timezone") or "UTC"

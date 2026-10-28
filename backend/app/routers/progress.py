@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
+from app.core.parallel import run_parallel
 from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
 from app.domain.progress import (
     WeekSummary,
@@ -228,39 +229,42 @@ def get_weekly_report(
     )
     previous_is_live = previous_week_start == this_week_start
 
-    current_summary = _week_summary(
-        db,
-        user_id=current_user.user_id,
-        week_start=current_week_start,
-        tz_name=tz_name,
-        target_calories=target_calories,
-        target_protein_g=target_protein_g,
-        target_carbs_g=target_carbs_g,
-        target_fat_g=target_fat_g,
-        is_live=current_is_live,
-        days_in_period=current_days_in_period,
-    )
-    previous_summary = _week_summary(
-        db,
-        user_id=current_user.user_id,
-        week_start=previous_week_start,
-        tz_name=tz_name,
-        target_calories=target_calories,
-        target_protein_g=target_protein_g,
-        target_carbs_g=target_carbs_g,
-        target_fat_g=target_fat_g,
-        is_live=previous_is_live,
-        days_in_period=7,
-    )
-
     weight_start, _ = day_bounds_utc(current_week_start, tz_name)
     _, weight_end = day_bounds_utc(current_week_start + timedelta(days=6), tz_name)
-    current_weight_logs = db.select(
-        "weight_logs",
-        {
-            "user_id": f"eq.{current_user.user_id}",
-            "logged_at": [f"gte.{weight_start.isoformat()}", f"lt.{weight_end.isoformat()}"],
-        },
+
+    # The two week summaries and the week's weights are independent reads.
+    current_summary, previous_summary, current_weight_logs = run_parallel(
+        lambda: _week_summary(
+            db,
+            user_id=current_user.user_id,
+            week_start=current_week_start,
+            tz_name=tz_name,
+            target_calories=target_calories,
+            target_protein_g=target_protein_g,
+            target_carbs_g=target_carbs_g,
+            target_fat_g=target_fat_g,
+            is_live=current_is_live,
+            days_in_period=current_days_in_period,
+        ),
+        lambda: _week_summary(
+            db,
+            user_id=current_user.user_id,
+            week_start=previous_week_start,
+            tz_name=tz_name,
+            target_calories=target_calories,
+            target_protein_g=target_protein_g,
+            target_carbs_g=target_carbs_g,
+            target_fat_g=target_fat_g,
+            is_live=previous_is_live,
+            days_in_period=7,
+        ),
+        lambda: db.select(
+            "weight_logs",
+            {
+                "user_id": f"eq.{current_user.user_id}",
+                "logged_at": [f"gte.{weight_start.isoformat()}", f"lt.{weight_end.isoformat()}"],
+            },
+        ),
     )
     weight_trend = compute_weight_trend(current_weight_logs)
 

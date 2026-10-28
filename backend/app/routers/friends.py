@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,6 +12,12 @@ from app.domain.progress import week_bounds
 from app.domain.timeutil import day_bounds_utc, local_today, utc_timestamp_to_local_date
 
 router = APIRouter(prefix="/api/friends", tags=["friends"])
+
+# The leaderboard needs two reads per visible user (this week's logs and a
+# longer streak window). They are independent, so they run concurrently
+# instead of one after another -- with N friends that is the difference
+# between ~2N sequential round-trips and roughly one.
+_pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="leaderboard")
 
 # Friend meal activity is intentionally a short, recent window -- a
 # lightweight "what's happening" glance, not a social feed history.
@@ -195,8 +202,8 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
     # a friend who has leaderboard_visible = false.
     visible_profiles = [p for p in profiles if p["id"] == current_user.user_id or p["leaderboard_visible"]]
 
-    scores = []
-    streaks: dict[str, int] = {}
+    # Per-user calendar maths first (cheap, no I/O), then every read at once.
+    plans = []
     for profile in visible_profiles:
         # Every friend's own local calendar (timezone, "today", and the
         # current week) drives their bucketing -- never the requesting
@@ -215,31 +222,19 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
         streak_start, _ = day_bounds_utc(
             friend_today - timedelta(days=STREAK_LOOKBACK_DAYS), friend_tz
         )
-
-        logs = db.select(
+        week_future = _pool.submit(
+            db.select,
             "food_logs",
             {
                 "user_id": f"eq.{profile['id']}",
                 "logged_at": [f"gte.{start.isoformat()}", f"lt.{end.isoformat()}"],
             },
         )
-        scores.append(
-            compute_discipline_score(
-                user_id=profile["id"],
-                username=profile["username"],
-                food_logs=logs,
-                week_start=friend_week_start,
-                target_calories=profile["target_calories"],
-                is_self=profile["id"] == current_user.user_id,
-                tz_name=friend_tz,
-                days_in_period=days_in_period,
-            )
-        )
-
         # A separate, narrow (logged_at only) query over the longer streak
         # lookback -- kept independent of the 7-day discipline-score query
-        # above so neither computation risks the other's correctness.
-        streak_logs = db.select(
+        # so neither computation risks the other's correctness.
+        streak_future = _pool.submit(
+            db.select,
             "food_logs",
             {
                 "user_id": f"eq.{profile['id']}",
@@ -247,8 +242,27 @@ def get_leaderboard(current_user: CurrentUserDep) -> list[LeaderboardEntry]:
                 "select": "logged_at",
             },
         )
+        plans.append(
+            (profile, friend_tz, friend_today, friend_week_start, days_in_period, week_future, streak_future)
+        )
+
+    scores = []
+    streaks: dict[str, int] = {}
+    for profile, friend_tz, friend_today, friend_week_start, days_in_period, week_f, streak_f in plans:
+        scores.append(
+            compute_discipline_score(
+                user_id=profile["id"],
+                username=profile["username"],
+                food_logs=week_f.result(),
+                week_start=friend_week_start,
+                target_calories=profile["target_calories"],
+                is_self=profile["id"] == current_user.user_id,
+                tz_name=friend_tz,
+                days_in_period=days_in_period,
+            )
+        )
         logged_dates = {
-            utc_timestamp_to_local_date(row["logged_at"], friend_tz) for row in streak_logs
+            utc_timestamp_to_local_date(row["logged_at"], friend_tz) for row in streak_f.result()
         }
         streaks[profile["id"]] = calculate_logging_streak(logged_dates, friend_today)
 
