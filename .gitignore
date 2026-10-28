@@ -14,3 +14,13 @@ Thumbs.db
 
 # frontend/ has its own .gitignore (create-next-app default, extended for
 # .env.example) — not duplicated here.
+
+# Local tool configs, test artifacts and env variants (never commit)
+.codex/
+.claude/settings.local.json
+backend/.env.*
+!backend/.env.example
+frontend/.env*.local
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo
