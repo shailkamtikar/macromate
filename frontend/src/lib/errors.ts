@@ -62,10 +62,18 @@ const MESSAGES: Record<ErrorContext, string> = {
  * message safe to render in the UI. Never include `err`'s message, an HTTP
  * status code, a response body, or an API path in the returned string. */
 export function friendlyMessage(err: unknown, context: ErrorContext = "generic"): string {
-  console.error(`[${context}]`, err);
+  const status = (err as { status?: number } | null)?.status;
+  // A 4xx is the server telling the user something they can act on (e.g.
+  // "these custom macros don't add up to your calories") -- expected, not a
+  // bug, so it is logged as a warning. Only real failures use console.error,
+  // which is what Next's dev overlay counts as an "issue".
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    console.warn(`[${context}]`, err);
+  } else {
+    console.error(`[${context}]`, err);
+  }
   // Two statuses deserve their own wording regardless of where they happen:
   // rate-limited (the server says to slow down) and timed out.
-  const status = (err as { status?: number } | null)?.status;
   if (status === 429) return "You’re going a bit fast — please wait a moment and try again.";
   if (status === 408) return "That’s taking longer than expected. Please try again.";
   return MESSAGES[context];
@@ -85,7 +93,7 @@ const AUTH_MESSAGES: Record<string, string> = {
  * otherwise falls back to a generic message -- never renders Supabase's
  * raw error string. */
 export function friendlyAuthMessage(err: unknown, mode: "login" | "signup"): string {
-  console.error(`[auth-${mode}]`, err);
+  console.warn(`[auth-${mode}]`, err);
   const raw = err instanceof Error ? err.message.toLowerCase() : "";
   for (const [needle, friendly] of Object.entries(AUTH_MESSAGES)) {
     if (raw.includes(needle)) return friendly;
