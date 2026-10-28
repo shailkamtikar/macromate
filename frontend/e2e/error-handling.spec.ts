@@ -156,7 +156,7 @@ test("a failed diary load shows a friendly message, never a raw HTTP status or A
 }) => {
   const user = await createOnboardedUser("diary-error");
   try {
-    await page.route("**/api/food-logs*", (route) =>
+    await page.route(/\/api\/days\/\d{4}-\d{2}-\d{2}/, (route) =>
       route.fulfill({
         status: 404,
         contentType: "application/json",
@@ -176,7 +176,7 @@ test("a failed diary load shows a friendly message, never a raw HTTP status or A
     const bodyText = await page.locator("body").innerText();
     expect(bodyText).not.toContain("404");
     expect(bodyText).not.toContain("Not Found");
-    expect(bodyText).not.toContain("/api/food-logs");
+    expect(bodyText).not.toContain("/api/days");
     expect(bodyText).not.toContain("failed (");
   } finally {
     await deleteUser(user.userId);
