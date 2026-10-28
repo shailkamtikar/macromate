@@ -1,11 +1,14 @@
+import logging
+import time
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.auth import CurrentUserDep
 from app.core.config import get_settings
+from app.core.supabase_admin import SupabaseAdmin
 from app.routers.achievements import router as achievements_router
 from app.routers.activity import router as activity_router
 from app.routers.ai_food import router as ai_food_router
@@ -34,8 +37,32 @@ from app.domain.macros import (
 )
 
 settings = get_settings()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("macromate.requests")
 
 app = FastAPI(title="MacroMate API", version="0.1.0")
+
+
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """Logs every request with its class (`ai` = Gemini-backed under
+    /api/ai/, `data` = everything else) and duration, and exposes the
+    duration to the browser via Server-Timing -- so slow AI calls are
+    visibly separate from data calls in logs and DevTools."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    request_class = "ai" if request.url.path.startswith("/api/ai/") else "data"
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.0f}"
+    logger.info(
+        "class=%s method=%s path=%s status=%s duration_ms=%.0f",
+        request_class,
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +88,24 @@ app.include_router(activity_router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}
+
+
+@app.get("/health/deep")
+def health_deep() -> dict[str, str]:
+    """Reachability check for the dependencies the app needs: Supabase (a
+    1-row read) and whether a Gemini key is configured. It never calls
+    Gemini itself, so it costs no AI quota."""
+    try:
+        SupabaseAdmin().select("glass_sizes", {"select": "id", "limit": "1"})
+        supabase_status = "ok"
+    except Exception as exc:  # noqa: BLE001 - report, never raise, from a health check
+        logger.warning("deep health: supabase check failed: %s", exc)
+        supabase_status = "unreachable"
+    return {
+        "supabase": supabase_status,
+        "gemini_key": "present" if settings.gemini_api_key else "missing",
+        "environment": settings.environment,
+    }
 
 
 @app.get("/api/me")

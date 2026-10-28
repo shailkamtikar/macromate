@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     gemini_primary_model: str = "gemini-3.6-flash"
     gemini_fallback_model: str = "gemini-3.5-flash-lite"
 
+    # Max Gemini calls in flight at once (see app/core/gemini.py).
+    ai_max_concurrency: int = 4
+
     fcm_server_key: str | None = None
 
     cors_allow_origins: list[str] = ["http://localhost:3000"]

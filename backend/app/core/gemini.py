@@ -9,6 +9,7 @@ output only, not as a source of truth for calculations.
 """
 
 import logging
+import threading
 import time
 
 import httpx
@@ -24,6 +25,12 @@ _GENERATE_URL = (
 
 class GeminiError(Exception):
     pass
+
+
+class GeminiBusy(GeminiError):
+    """Too many Gemini calls are already in flight. Raised quickly (instead of
+    queueing for ~30 s) so a burst of slow AI requests can never occupy every
+    worker thread and starve the plain data endpoints."""
 
 
 class GeminiUnavailable(GeminiError):
@@ -102,6 +109,12 @@ def _call_model(
     return text
 
 
+# Handlers are synchronous and run on FastAPI's small thread pool; each
+# Gemini call can hold a thread for ~30 s. Capping concurrent AI calls keeps
+# threads free for ordinary data requests.
+_ai_slots = threading.BoundedSemaphore(get_settings().ai_max_concurrency)
+_SLOT_WAIT_SECONDS = 2.0
+
 # The fallback only runs after the primary has already failed/timed out --
 # giving it the same generous timeout as the primary would let a hung
 # primary plus a hung fallback add up to ~2x `timeout` worst-case latency.
@@ -130,6 +143,29 @@ def generate_text(
     settings = get_settings()
     if fallback_timeout is None:
         fallback_timeout = min(timeout, DEFAULT_FALLBACK_TIMEOUT)
+    if not _ai_slots.acquire(timeout=_SLOT_WAIT_SECONDS):
+        raise GeminiUnavailable("AI is busy right now, please try again in a moment")
+    try:
+        return _generate_with_fallback(
+            prompt,
+            system_instruction=system_instruction,
+            history=history,
+            timeout=timeout,
+            fallback_timeout=fallback_timeout,
+        )
+    finally:
+        _ai_slots.release()
+
+
+def _generate_with_fallback(
+    prompt: str,
+    *,
+    system_instruction: str | None,
+    history: list[dict] | None,
+    timeout: float,
+    fallback_timeout: float,
+) -> str:
+    settings = get_settings()
     try:
         return _call_model(
             settings.gemini_primary_model,
