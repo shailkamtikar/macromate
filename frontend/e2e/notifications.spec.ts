@@ -18,7 +18,7 @@ const SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
 const API_URL = "http://localhost:8000";
 const adminHeaders = {
   apikey: SERVICE_ROLE_KEY,
-  Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+  ...(SERVICE_ROLE_KEY.startsWith("sb_secret_") ? {} : { Authorization: `Bearer ${SERVICE_ROLE_KEY}` }),
   "Content-Type": "application/json",
 };
 

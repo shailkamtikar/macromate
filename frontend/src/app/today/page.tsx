@@ -26,12 +26,13 @@ import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
 import { friendlyMessage } from "@/lib/errors";
 import { MEAL_TYPES, inferMealType } from "@/lib/servings";
 import { nextTempId } from "@/lib/tempId";
-import { BootstrapLoader } from "@/components/BootstrapLoader";
 import { DiaryMeal } from "@/components/DiaryMeal";
 import { FoodPicker } from "@/components/FoodPicker";
 import { NumericField } from "@/components/NumericField";
 import { WaterGlasses } from "@/components/WaterGlasses";
 import { StreakChip } from "@/components/AchievementsCard";
+import { Skeleton } from "@/components/Skeleton";
+import { SuggestionsCard } from "@/components/SuggestionsCard";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
@@ -55,6 +56,8 @@ export default function TodayPage() {
   const [water, setWater] = useState<WaterSummary | null>(null);
   const [glassSizes, setGlassSizes] = useState<GlassSize[] | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionsResponse | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true);
+  const [suggestionsError, setSuggestionsError] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logActionBusy, setLogActionBusy] = useState<string | null>(null);
@@ -72,7 +75,9 @@ export default function TodayPage() {
   // *after* a mutation the user fired off while it was in flight. Without
   // this guard, that stale response would overwrite the fresher optimistic
   // state with a pre-mutation snapshot.
-  const mutationVersion = useRef(0);
+  // Per-domain now that the domains load independently: a water click must
+  // not discard a still-in-flight diary response (or vice versa).
+  const mutationVersion = useRef({ food: 0, water: 0, glass: 0 });
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only time-of-day default, deliberately not computed during SSR
@@ -99,35 +104,49 @@ export default function TodayPage() {
     }
   }, [profile, session]);
 
-  // Full fetch of all four domains -- used only for the initial mount and
-  // the manual "Retry" link after a load failure. Every mutation below
-  // instead applies an optimistic update and/or a single targeted refetch
-  // of just the domain(s) it can actually affect, rather than reloading
-  // everything on every click (see the audit finding this replaces).
+  // Initial fetch. The diary, water and glass sizes load independently and
+  // each renders the moment *it* arrives -- previously one Promise.all made
+  // the whole page wait for the slowest call (suggestions). Suggestions are
+  // requested only once the core data has landed, so they never compete
+  // with it for the backend and never block it. Mutations afterwards use
+  // optimistic updates and targeted refetches of just the domain they affect.
   async function loadDay() {
     setLoadError(null);
-    const startVersion = mutationVersion.current;
+    const start = { ...mutationVersion.current };
+    const day = todayIso();
     try {
-      const [logs, waterSummary, glasses, suggestionsRes] = await Promise.all([
-        fetchFoodLogs(todayIso()),
-        fetchWaterLogs(todayIso()),
-        fetchGlassSizes(),
-        fetchSuggestions(),
+      await Promise.all([
+        fetchFoodLogs(day).then((logs) => {
+          if (mutationVersion.current.food !== start.food) return;
+          setFoodLogs(logs);
+          setDiaryVersion((v) => v + 1);
+        }),
+        fetchWaterLogs(day).then((summary) => {
+          if (mutationVersion.current.water !== start.water) return;
+          setWater(summary);
+        }),
+        fetchGlassSizes().then((glasses) => {
+          if (mutationVersion.current.glass !== start.glass) return;
+          setGlassSizes(glasses);
+        }),
       ]);
-      // A mutation landed while this fetch was in flight -- its optimistic
-      // state is newer than this response, so applying it now would revert
-      // real, user-visible changes. Bail out; the mutation's own state
-      // update is already authoritative-enough (and, where relevant, has
-      // its own targeted refetch).
-      if (mutationVersion.current !== startVersion) return;
-      setFoodLogs(logs);
-      setWater(waterSummary);
-      setGlassSizes(glasses);
-      setSuggestions(suggestionsRes);
-      setDiaryVersion((v) => v + 1);
     } catch (err) {
-      if (mutationVersion.current !== startVersion) return;
       setLoadError(friendlyMessage(err, "diary-load"));
+      setSuggestionsLoading(false);
+      return;
+    }
+    await loadSuggestions();
+  }
+
+  async function loadSuggestions() {
+    setSuggestionsLoading(true);
+    setSuggestionsError(false);
+    try {
+      setSuggestions(await fetchSuggestions());
+    } catch {
+      setSuggestionsError(true);
+    } finally {
+      setSuggestionsLoading(false);
     }
   }
 
@@ -147,6 +166,7 @@ export default function TodayPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount, standard pattern
     if (session && profile) loadDay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadDay is recreated every render; the load is keyed on session/profile only
   }, [session, profile]);
 
   useEffect(() => {
@@ -190,7 +210,7 @@ export default function TodayPage() {
   // bootstrap moment rather than something that would otherwise flash on
   // every visit to Today, and the same branded loader is appropriate here.
   if (sessionLoading || profile === undefined || !session) {
-    return <BootstrapLoader />;
+    return <TodaySkeleton />;
   }
   if (!profile) {
     return <p className="p-10 text-sm text-on-surface-variant">Redirecting to onboarding…</p>;
@@ -217,7 +237,7 @@ export default function TodayPage() {
   // still-in-flight water mutation.
   async function handleQuickWater(volumeMl: number) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.water += 1;
     setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml + volumeMl } : prev));
     try {
       await logWater(volumeMl);
@@ -229,7 +249,7 @@ export default function TodayPage() {
 
   async function handleRemoveWater(volumeMl: number) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.water += 1;
     setWater((prev) => (prev ? { ...prev, total_ml: Math.max(0, prev.total_ml - volumeMl) } : prev));
     try {
       // Unlike logWater, removeWater's response IS the server's own
@@ -245,7 +265,7 @@ export default function TodayPage() {
 
   async function handleAddGlassSize(label: string, volumeMl: number) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.glass += 1;
     const tempId = nextTempId();
     setGlassSizes((prev) => [...(prev ?? []), { id: tempId, label, volume_ml: volumeMl }]);
     try {
@@ -259,7 +279,7 @@ export default function TodayPage() {
 
   function handleFoodLogStart(entry: FoodLog) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.food += 1;
     setFoodLogs((prev) => [...(prev ?? []), entry]);
   }
 
@@ -279,7 +299,7 @@ export default function TodayPage() {
     changes: { quantity?: number; meal_type?: MealType },
   ) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.food += 1;
     setLogActionBusy(logId);
     let previous: FoodLog | undefined;
     setFoodLogs((prev) =>
@@ -318,7 +338,7 @@ export default function TodayPage() {
   async function handleDeleteEntry(log: FoodLog) {
     if (!window.confirm(`Remove ${log.food_name} from today's diary?`)) return;
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.food += 1;
     setLogActionBusy(log.id);
     setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== log.id));
     try {
@@ -335,7 +355,7 @@ export default function TodayPage() {
 
   async function handleSuggestionAdd(food: SuggestedFood) {
     setActionError(null);
-    mutationVersion.current += 1;
+    mutationVersion.current.food += 1;
     const tempId = nextTempId();
     const mealType = inferMealType();
     setFoodLogs((prev) => [
@@ -408,6 +428,9 @@ export default function TodayPage() {
           {/* Diary column */}
           <div className="space-y-4 lg:col-span-2">
             {/* Daily totals */}
+            {foodLogs === null ? (
+              <EnergyCardSkeleton />
+            ) : (
             <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -500,10 +523,15 @@ export default function TodayPage() {
                 })}
               </div>
             </section>
+            )}
 
             {/* Meal-by-meal diary */}
             {foodLogs === null ? (
-              <p className="text-sm text-on-surface-variant">Loading your diary…</p>
+              <div aria-busy="true" className="space-y-4">
+                <Skeleton className="h-28 w-full" />
+                <Skeleton className="h-28 w-full" />
+                <Skeleton className="h-28 w-full" />
+              </div>
             ) : (
               <div data-testid="diary" className="space-y-4">
                 {MEAL_TYPES.map((meal) => (
@@ -544,57 +572,13 @@ export default function TodayPage() {
               disabled={!waterLoaded}
             />
 
-            {suggestions && (
-              <section
-                data-testid="suggestions-card"
-                className="rounded-[var(--radius-card)] border border-primary/25 bg-surface-container-lowest p-5 shadow-sm"
-              >
-                <div className="mb-1 flex items-center gap-1.5 text-primary">
-                  <span className="material-symbols-outlined text-lg" aria-hidden="true">psychology</span>
-                  <span className="text-xs font-bold uppercase tracking-wider">
-                    What to eat next
-                  </span>
-                </div>
-                <p className="mb-1 text-xs text-on-surface-variant">
-                  Based on what&apos;s left today: {suggestions.remaining_calories} kcal
-                  {suggestions.protein_is_priority
-                    ? ` · ${suggestions.remaining_protein_g}g protein still needed`
-                    : " · protein goal on track"}
-                </p>
-                <p
-                  data-testid="suggestions-message"
-                  className="mb-3 text-sm text-on-surface-variant"
-                >
-                  {suggestions.message}
-                </p>
-                {suggestions.suggestions.length > 0 && (
-                  <div className="space-y-2">
-                    {suggestions.suggestions.map((food) => (
-                      <div
-                        key={food.id}
-                        className="flex items-center justify-between gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-3"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-on-surface">
-                            {food.name}
-                          </p>
-                          <p className="text-xs text-on-surface-variant">
-                            {Math.round(food.calories)} kcal · P {Math.round(food.protein_g)}g
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleSuggestionAdd(food)}
-                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary"
-                          aria-label={`Add ${food.name}`}
-                        >
-                          +
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
+            <SuggestionsCard
+              data={suggestions}
+              loading={suggestionsLoading}
+              error={suggestionsError}
+              onRetry={loadSuggestions}
+              onAdd={handleSuggestionAdd}
+            />
           </div>
         </div>
       </div>
@@ -717,5 +701,57 @@ function WaterCard({
         </form>
       )}
     </section>
+  );
+}
+
+function EnergyCardSkeleton() {
+  return (
+    <section
+      aria-busy="true"
+      className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+    >
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-9 w-40" />
+        </div>
+        <Skeleton className="h-20 w-20 rounded-full" />
+      </div>
+      <Skeleton className="mt-4 h-14 w-full" />
+      <div className="mt-4 space-y-3">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+      </div>
+    </section>
+  );
+}
+
+/** Page-shaped placeholder shown while the session/profile resolve, so the
+ * dashboard has its final layout from the first paint. */
+function TodaySkeleton() {
+  return (
+    <main aria-busy="true" className="flex flex-1 justify-center px-4 py-6 sm:px-6">
+      <div className="w-full max-w-2xl space-y-4 lg:max-w-6xl">
+        <div className="space-y-2 pt-1">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-6 w-44" />
+        </div>
+        <div className="lg:grid lg:grid-cols-3 lg:items-start lg:gap-4">
+          <div className="space-y-4 lg:col-span-2">
+            <EnergyCardSkeleton />
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+          <div className="mt-4 space-y-4 lg:mt-0">
+            <Skeleton className="h-56 w-full" />
+            <Skeleton className="h-44 w-full" />
+          </div>
+        </div>
+      </div>
+      <span className="sr-only" role="status">
+        Loading your diary…
+      </span>
+    </main>
   );
 }
