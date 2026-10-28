@@ -318,3 +318,160 @@ def test_food_items_are_globally_readable_but_only_creator_can_edit_unverified(
             headers=admin_headers,
             timeout=15,
         )
+
+
+# ---------------------------------------------------------------------------
+# Trust-hole regressions (migration 20261028110000): a user must not be able
+# to approve their own friend request or mint a "verified" food from the
+# browser, even with a perfectly valid JWT of their own.
+# ---------------------------------------------------------------------------
+def _service_headers() -> dict:
+    from app.core.supabase_admin import service_headers
+
+    return {**service_headers(settings.supabase_service_role_key), "Prefer": "return=representation"}
+
+
+def _friendship_status(friendship_id: str) -> str:
+    resp = httpx.get(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_service_headers(),
+        params={"id": f"eq.{friendship_id}", "select": "status"},
+        timeout=15,
+    )
+    return resp.json()[0]["status"]
+
+
+def test_requester_cannot_approve_their_own_friend_request(two_users):
+    a, b = two_users["a"], two_users["b"]
+    created = httpx.post(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_service_headers(),
+        json={"requester_id": a["id"], "addressee_id": b["id"], "status": "pending"},
+        timeout=15,
+    )
+    assert created.status_code == 201, created.text
+    friendship_id = created.json()[0]["id"]
+
+    attack = httpx.patch(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_rest_headers(a["token"]),
+        params={"id": f"eq.{friendship_id}"},
+        json={"status": "accepted"},
+        timeout=15,
+    )
+    assert attack.status_code in (200, 204, 401, 403), attack.text
+    assert _friendship_status(friendship_id) == "pending"
+
+
+def test_addressee_can_respond_but_only_to_a_pending_request(two_users):
+    a, b = two_users["a"], two_users["b"]
+    created = httpx.post(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_service_headers(),
+        json={"requester_id": a["id"], "addressee_id": b["id"], "status": "pending"},
+        timeout=15,
+    )
+    friendship_id = created.json()[0]["id"]
+
+    accept = httpx.patch(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_rest_headers(b["token"]),
+        params={"id": f"eq.{friendship_id}"},
+        json={"status": "accepted"},
+        timeout=15,
+    )
+    assert accept.status_code == 200, accept.text
+    assert _friendship_status(friendship_id) == "accepted"
+
+    # An already-answered request can't be flipped back by the addressee.
+    revert = httpx.patch(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_rest_headers(b["token"]),
+        params={"id": f"eq.{friendship_id}"},
+        json={"status": "declined"},
+        timeout=15,
+    )
+    assert revert.status_code in (200, 204, 401, 403)
+    assert _friendship_status(friendship_id) == "accepted"
+
+
+def test_cannot_insert_a_friend_request_that_is_already_accepted(two_users):
+    a, b = two_users["a"], two_users["b"]
+    attack = httpx.post(
+        f"{settings.supabase_url}/rest/v1/friendships",
+        headers=_rest_headers(a["token"]),
+        json={"requester_id": a["id"], "addressee_id": b["id"], "status": "accepted"},
+        timeout=15,
+    )
+    assert attack.status_code in (401, 403), attack.text
+
+
+def test_user_cannot_create_or_promote_a_verified_food(two_users):
+    a = two_users["a"]
+    name = f"__rls_food_{uuid.uuid4().hex[:8]}"
+    base = {
+        "name": name,
+        "serving_description": "1 serving",
+        "calories": 100,
+        "protein_g": 5,
+        "carbs_g": 10,
+        "fat_g": 2,
+        "created_by": a["id"],
+    }
+
+    # Inserting as verified is rejected...
+    attack = httpx.post(
+        f"{settings.supabase_url}/rest/v1/food_items",
+        headers=_rest_headers(a["token"]),
+        json={**base, "verified": True},
+        timeout=15,
+    )
+    assert attack.status_code in (401, 403), attack.text
+
+    # ...an ordinary unverified food is fine...
+    ok = httpx.post(
+        f"{settings.supabase_url}/rest/v1/food_items",
+        headers=_rest_headers(a["token"]),
+        json={**base, "verified": False},
+        timeout=15,
+    )
+    assert ok.status_code == 201, ok.text
+    food_id = ok.json()[0]["id"]
+    try:
+        # ...but promoting it, or flagging it as an AI estimate, is not.
+        for change in ({"verified": True}, {"is_ai_estimate": True}):
+            promote = httpx.patch(
+                f"{settings.supabase_url}/rest/v1/food_items",
+                headers=_rest_headers(a["token"]),
+                params={"id": f"eq.{food_id}"},
+                json=change,
+                timeout=15,
+            )
+            assert promote.status_code in (200, 204, 401, 403), promote.text
+            row = httpx.get(
+                f"{settings.supabase_url}/rest/v1/food_items",
+                headers=_service_headers(),
+                params={"id": f"eq.{food_id}", "select": "verified,is_ai_estimate"},
+                timeout=15,
+            ).json()[0]
+            assert row == {"verified": False, "is_ai_estimate": False}
+    finally:
+        httpx.delete(
+            f"{settings.supabase_url}/rest/v1/food_items",
+            headers=_service_headers(),
+            params={"id": f"eq.{food_id}"},
+            timeout=15,
+        )
+
+
+def test_personal_ai_estimate_food_is_unique_per_owner_and_name(two_users):
+    a = two_users["a"]
+    from app.core.supabase_admin import SupabaseAdmin
+    from app.domain.food_resolution import get_or_create_personal_food
+
+    db = SupabaseAdmin()
+    kwargs = dict(serving_description="1 g", calories=2, protein_g=0.2, carbs_g=0.1, fat_g=0.1)
+    first = get_or_create_personal_food(db, a["id"], name="Test Paneer", **kwargs)
+    again = get_or_create_personal_food(db, a["id"], name="  test paneer ", **kwargs)
+    assert first["id"] == again["id"]
+    db._request("DELETE", "food_items", params={"id": f"eq.{first['id']}"})

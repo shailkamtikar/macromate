@@ -25,7 +25,7 @@ right, since it can't hold an interactive disambiguation mid-chat).
 
 from dataclasses import dataclass, field
 
-from app.core.supabase_admin import SupabaseAdmin
+from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
 from app.domain.ai_food_parser import ParsedFoodItem
 from app.domain.food import compute_nutrition_snapshot, parse_serving_weight
 
@@ -240,6 +240,19 @@ def resolve_food_mention(
     )
 
 
+def _escape_like(value: str) -> str:
+    """Escapes ILIKE wildcards so a food named "50% off" or "a_b" matches
+    literally (case-insensitively), never as a pattern. PostgREST itself
+    treats `*` as a wildcard, so a literal asterisk is matched with a
+    single-character wildcard instead."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        .replace("*", "_")
+    )
+
+
 def get_or_create_personal_food(
     db: SupabaseAdmin,
     user_id: str,
@@ -263,30 +276,53 @@ def get_or_create_personal_food(
     keeps the nutrition it was first accepted with); this only decides
     whether to insert a new row or reuse one, it never mutates one.
     """
-    owned = db.select("food_items", {"created_by": f"eq.{user_id}", "select": "*"})
-    needle = name.strip().lower()
-    match = next(
-        (
-            row
-            for row in owned
-            if row.get("is_ai_estimate") and (row.get("name") or "").strip().lower() == needle
-        ),
-        None,
-    )
-    if match is not None:
-        return match
-
-    return db.insert(
+    needle = name.strip()
+    # Look the food up by name in SQL (case-insensitive) instead of loading
+    # every food this user ever created and filtering in Python.
+    existing = db.select(
         "food_items",
         {
-            "name": name,
-            "serving_description": serving_description,
-            "calories": calories,
-            "protein_g": protein_g,
-            "carbs_g": carbs_g,
-            "fat_g": fat_g,
-            "verified": False,
-            "is_ai_estimate": True,
-            "created_by": user_id,
+            "created_by": f"eq.{user_id}",
+            "is_ai_estimate": "eq.true",
+            "name": f"ilike.{_escape_like(needle)}",
+            "select": "*",
+            "limit": "1",
         },
-    )[0]
+    )
+    if existing:
+        return existing[0]
+
+    try:
+        return db.insert(
+            "food_items",
+            {
+                "name": name,
+                "serving_description": serving_description,
+                "calories": calories,
+                "protein_g": protein_g,
+                "carbs_g": carbs_g,
+                "fat_g": fat_g,
+                "verified": False,
+                "is_ai_estimate": True,
+                "created_by": user_id,
+            },
+        )[0]
+    except SupabaseAdminError as exc:
+        # Two simultaneous logs of the same new estimate: the unique index
+        # (created_by, lower(name)) rejected the second insert. Use the row
+        # the first one created.
+        if exc.status_code != 409:
+            raise
+        winner = db.select(
+            "food_items",
+            {
+                "created_by": f"eq.{user_id}",
+                "is_ai_estimate": "eq.true",
+                "name": f"ilike.{_escape_like(needle)}",
+                "select": "*",
+                "limit": "1",
+            },
+        )
+        if winner:
+            return winner[0]
+        raise
