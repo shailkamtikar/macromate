@@ -49,6 +49,13 @@ async function createOnboardedUser() {
       target_fat_g: 70,
     }),
   });
+  // A real weight, so BMI/maintenance questions have something to work from
+  // (the Coach no longer substitutes a made-up number when there is none).
+  await fetch(`${SUPABASE_URL}/rest/v1/weight_logs`, {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({ user_id: userId, weight_kg: 75 }),
+  });
 
   return { email, password, userId };
 }

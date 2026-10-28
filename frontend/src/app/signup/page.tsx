@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { friendlyAuthMessage } from "@/lib/errors";
 import { supabase } from "@/lib/supabaseClient";
 import { AuthBrandMark } from "@/components/AuthBrandMark";
+import { AuthShell } from "@/components/AuthShell";
 import { PasswordField } from "@/components/PasswordField";
 
 export default function SignupPage() {
@@ -45,8 +46,7 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-10">
-      <div className="w-full max-w-sm space-y-6">
+    <AuthShell>
         <div className="flex flex-col items-center gap-4 text-center">
           <AuthBrandMark />
           <div>
@@ -61,7 +61,7 @@ export default function SignupPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
+          className="card space-y-4 p-6"
         >
           <div className="flex flex-col gap-1">
             <label htmlFor="signup-email" className="text-xs font-medium text-on-surface-variant">
@@ -88,7 +88,7 @@ export default function SignupPage() {
             type="submit"
             disabled={loading}
             aria-busy={loading}
-            className="w-full rounded-[var(--radius-control)] bg-primary py-3 text-sm font-semibold text-on-primary disabled:opacity-60"
+            className="w-full rounded-full bg-primary py-3 text-sm font-semibold text-on-primary transition-transform active:scale-[0.98] disabled:opacity-60"
           >
             {loading ? "Creating account…" : "Sign up"}
           </button>
@@ -111,7 +111,6 @@ export default function SignupPage() {
             Log in
           </Link>
         </p>
-      </div>
-    </main>
+    </AuthShell>
   );
 }

@@ -121,8 +121,11 @@ export interface CoachMessage {
   action?: "add_food" | "remove_food" | "log_water" | null;
 }
 
-export async function fetchCoachHistory(): Promise<CoachMessage[]> {
-  const res = await authFetch("/api/ai/coach/history");
+/** The most recent messages, oldest first. Pass `before` (the created_at of
+ * the oldest message already loaded) to get the page before it. */
+export async function fetchCoachHistory(before?: string): Promise<CoachMessage[]> {
+  const qs = before ? `?before=${encodeURIComponent(before)}` : "";
+  const res = await authFetch(`/api/ai/coach/history${qs}`);
   return res.json();
 }
 

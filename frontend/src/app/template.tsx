@@ -10,7 +10,7 @@ import { ease } from "@/components/ui/motion";
 export default function Template({ children }: { children: React.ReactNode }) {
   return (
     <m.div
-      className="flex flex-1 flex-col"
+      className="flex min-w-0 flex-1 flex-col"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: ease.out }}

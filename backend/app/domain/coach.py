@@ -21,8 +21,9 @@ from app.domain.macros import (
 
 @dataclass(frozen=True)
 class CoachContext:
-    bmi: float
-    bmi_category: str
+    # None when the user has no weight log yet -- never guessed.
+    bmi: float | None
+    bmi_category: str | None
     goal: str
     target: MacroTargets
     remaining: RemainingMacros
@@ -36,11 +37,13 @@ class CoachContext:
     logged_food_names: list[str] = field(default_factory=list)
     weekly_summary: str | None = None
     activity_steps_today: int | None = None
+    # Estimated TDEE (no cut/bulk adjustment). Distinct from the target.
+    maintenance_calories: int | None = None
 
 
 def build_context(
     *,
-    weight_kg: float,
+    weight_kg: float | None,
     height_cm: float,
     sex: BiologicalSex,
     goal: Goal,
@@ -55,8 +58,9 @@ def build_context(
     logged_food_names: list[str] | None = None,
     weekly_summary: str | None = None,
     activity_steps_today: int | None = None,
+    maintenance_calories: int | None = None,
 ) -> CoachContext:
-    bmi = calculate_bmi(weight_kg, height_cm)
+    bmi = calculate_bmi(weight_kg, height_cm) if weight_kg else None
     remaining = calculate_remaining_macros(
         target,
         consumed_calories=round(consumed_calories),
@@ -66,7 +70,7 @@ def build_context(
     )
     return CoachContext(
         bmi=bmi,
-        bmi_category=bmi_category(bmi),
+        bmi_category=bmi_category(bmi) if bmi is not None else None,
         goal=goal.value if hasattr(goal, "value") else str(goal),
         target=target,
         remaining=remaining,
@@ -76,6 +80,7 @@ def build_context(
         logged_food_names=logged_food_names or [],
         weekly_summary=weekly_summary,
         activity_steps_today=activity_steps_today,
+        maintenance_calories=maintenance_calories,
     )
 
 
@@ -87,7 +92,16 @@ def context_to_prompt_text(ctx: CoachContext) -> str:
     )
     lines = [
         f"- Goal: {ctx.goal}\n",
-        f"- BMI: {ctx.bmi} ({ctx.bmi_category})\n",
+        (
+            f"- BMI: {ctx.bmi} ({ctx.bmi_category})\n"
+            if ctx.bmi is not None
+            else "- BMI: unknown (no weight logged yet)\n"
+        ),
+        (
+            f"- Estimated maintenance calories: {ctx.maintenance_calories} kcal\n"
+            if ctx.maintenance_calories is not None
+            else ""
+        ),
         f"- Daily target: {ctx.target.calories} kcal, "
         f"{ctx.target.protein_g}g protein, {ctx.target.carbs_g}g carbs, {ctx.target.fat_g}g fat\n",
         f"- Remaining today: {ctx.remaining.calories} kcal, "
@@ -122,9 +136,21 @@ def deterministic_fast_path(message: str, ctx: CoachContext) -> str | None:
     if _PROTEIN_LEFT_RE.search(message):
         return f"You have {ctx.remaining.protein_g}g of protein left to hit your {ctx.target.protein_g}g target today."
     if _BMI_RE.search(message):
+        if ctx.bmi is None:
+            return "I can't work out your BMI yet \u2014 log your weight (Profile \u2192 Weight goal) and ask again."
         return f"Your BMI is {ctx.bmi}, which is in the {ctx.bmi_category} range."
     if _MAINTENANCE_RE.search(message):
-        return f"Your current daily target is {ctx.target.calories} kcal, based on your goal ({ctx.goal})."
+        if ctx.maintenance_calories is None:
+            return f"Your current daily target is {ctx.target.calories} kcal, based on your goal ({ctx.goal})."
+        if ctx.maintenance_calories == ctx.target.calories:
+            return (
+                f"Your estimated maintenance is {ctx.maintenance_calories} kcal a day, "
+                "and that's also your current target."
+            )
+        return (
+            f"Your estimated maintenance is {ctx.maintenance_calories} kcal a day. "
+            f"Your current target is {ctx.target.calories} kcal, set for your goal ({ctx.goal})."
+        )
     if _CALORIES_LEFT_RE.search(message):
         return f"You have {ctx.remaining.calories} kcal left today, out of your {ctx.target.calories} kcal target."
     return None

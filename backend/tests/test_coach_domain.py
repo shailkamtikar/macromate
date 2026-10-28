@@ -49,3 +49,42 @@ def test_calories_left_fast_path():
 def test_open_ended_question_has_no_fast_path():
     ctx = _ctx()
     assert deterministic_fast_path("What should I eat for dinner tonight?", ctx) is None
+
+
+def test_maintenance_question_returns_tdee_not_the_goal_target():
+    target = MacroTargets(calories=1900, protein_g=160, carbs_g=180, fat_g=60)
+    ctx = build_context(
+        weight_kg=80,
+        height_cm=178,
+        sex=BiologicalSex.MALE,
+        goal=Goal.CUT,
+        target=target,
+        consumed_calories=0,
+        consumed_protein_g=0,
+        consumed_carbs_g=0,
+        consumed_fat_g=0,
+        recent_weights_kg=[80],
+        maintenance_calories=2600,
+    )
+    answer = deterministic_fast_path("What are my maintenance calories?", ctx)
+    assert "2600" in answer and "1900" in answer
+    assert answer.index("2600") < answer.index("1900")  # maintenance comes first
+
+
+def test_bmi_without_any_weight_asks_for_one_instead_of_guessing():
+    target = MacroTargets(calories=2200, protein_g=160, carbs_g=220, fat_g=70)
+    ctx = build_context(
+        weight_kg=None,
+        height_cm=178,
+        sex=BiologicalSex.MALE,
+        goal=Goal.MAINTAIN,
+        target=target,
+        consumed_calories=0,
+        consumed_protein_g=0,
+        consumed_carbs_g=0,
+        consumed_fat_g=0,
+        recent_weights_kg=[],
+    )
+    assert ctx.bmi is None
+    answer = deterministic_fast_path("what's my bmi", ctx)
+    assert "log your weight" in answer.lower()

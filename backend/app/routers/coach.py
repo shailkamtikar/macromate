@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUserDep
@@ -10,7 +10,14 @@ from app.core.supabase_admin import SupabaseAdmin
 from app.domain.coach import build_context, context_to_prompt_text, deterministic_fast_path
 from app.domain.coach_actions import execute_add_food, execute_log_water, execute_remove_food
 from app.domain.coach_intent import COACH_INTENT_SYSTEM_INSTRUCTION, CoachIntent, parse_coach_intent
-from app.domain.macros import BiologicalSex, Goal, MacroTargets
+from app.domain.macros import (
+    ActivityLevel,
+    BiologicalSex,
+    Goal,
+    MacroTargets,
+    calculate_bmr,
+    calculate_tdee,
+)
 from app.domain.progress import build_weekly_report, week_bounds
 from app.domain.timeutil import day_bounds_utc, infer_meal_type, local_today
 
@@ -69,7 +76,9 @@ def _load_context(db: SupabaseAdmin, user_id: str, *, include_weekly_summary: bo
         {"user_id": f"eq.{user_id}", "order": "logged_at.desc", "limit": "5"},
     )
     recent_weights = [w["weight_kg"] for w in reversed(weight_rows)]
-    latest_weight = weight_rows[0]["weight_kg"] if weight_rows else profile.get("height_cm")
+    # No weight log yet -> unknown (None), never a stand-in number: the
+    # previous fallback used the user's HEIGHT as their weight.
+    latest_weight = weight_rows[0]["weight_kg"] if weight_rows else None
 
     today = local_today(tz_name)
     day_start, day_end = day_bounds_utc(today, tz_name)
@@ -113,6 +122,21 @@ def _load_context(db: SupabaseAdmin, user_id: str, *, include_weekly_summary: bo
         else None
     )
 
+    maintenance_calories = None
+    if latest_weight:
+        try:
+            bmr = calculate_bmr(
+                weight_kg=latest_weight,
+                height_cm=profile["height_cm"],
+                age_years=profile["age_years"],
+                sex=BiologicalSex(profile["sex"]),
+            )
+            maintenance_calories = round(
+                calculate_tdee(bmr, ActivityLevel(profile["activity_level"]))
+            )
+        except (KeyError, ValueError):
+            maintenance_calories = None
+
     target = MacroTargets(
         calories=profile["target_calories"],
         protein_g=profile["target_protein_g"],
@@ -121,7 +145,7 @@ def _load_context(db: SupabaseAdmin, user_id: str, *, include_weekly_summary: bo
     )
 
     ctx = build_context(
-        weight_kg=latest_weight or 70,
+        weight_kg=latest_weight,
         height_cm=profile["height_cm"],
         sex=BiologicalSex(profile["sex"]),
         goal=Goal(profile["goal"]),
@@ -136,6 +160,7 @@ def _load_context(db: SupabaseAdmin, user_id: str, *, include_weekly_summary: bo
         logged_food_names=logged_food_names[:8],
         weekly_summary=weekly_summary,
         activity_steps_today=activity_steps_today,
+        maintenance_calories=maintenance_calories,
     )
     return profile, ctx
 
@@ -198,14 +223,34 @@ def _add_weekly_summary(db: SupabaseAdmin, user_id: str, profile: dict, ctx):
     return replace(ctx, weekly_summary=summary)
 
 
+HISTORY_PAGE_SIZE = 40
+
+
 @router.get("/history", response_model=list[CoachMessageOut])
-def get_history(current_user: CurrentUserDep) -> list[CoachMessageOut]:
+def get_history(
+    current_user: CurrentUserDep,
+    limit: int = Query(default=HISTORY_PAGE_SIZE, ge=1, le=100),
+    before: str | None = Query(default=None),
+) -> list[CoachMessageOut]:
+    """The most RECENT `limit` messages, oldest first. `before` (an ISO
+    timestamp, the `created_at` of the oldest message the client already has)
+    returns the page just before it, for "load earlier" pagination. (This
+    used to return the OLDEST 100 messages, so after 100 messages new ones
+    never appeared on reload.)"""
     db = SupabaseAdmin()
-    rows = db.select(
-        "chat_history",
-        {"user_id": f"eq.{current_user.user_id}", "order": "created_at.asc", "limit": "100"},
-    )
-    return [CoachMessageOut(role=r["role"], content=r["content"], created_at=r["created_at"]) for r in rows]
+    params = {
+        "user_id": f"eq.{current_user.user_id}",
+        "order": "created_at.desc",
+        "limit": str(limit),
+    }
+    if before:
+        params["created_at"] = f"lt.{before}"
+    rows = db.select("chat_history", params)
+    rows.reverse()
+    return [
+        CoachMessageOut(role=r["role"], content=r["content"], created_at=r["created_at"])
+        for r in rows
+    ]
 
 
 def _load_recent_history(db: SupabaseAdmin, user_id: str, limit: int = COACH_HISTORY_TURN_LIMIT) -> list[dict]:
