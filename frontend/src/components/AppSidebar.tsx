@@ -11,7 +11,9 @@ import { GlassSizesManager } from "@/components/GlassSizesManager";
 import { NotificationsManager } from "@/components/NotificationsManager";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import ProfilePage from "@/app/profile/page";
+import { m } from "motion/react";
 import { Icon } from "@/components/Icon";
+import { ease } from "@/components/ui/motion";
 
 type SectionKey =
   | "profile"
@@ -195,14 +197,20 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: AppSidebarProps) {
                 key={item.href}
                 href={item.href}
                 title={item.label}
-                className={`flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-primary-container/40 text-primary"
-                    : "text-on-surface-variant hover:bg-surface-container-low"
+                aria-current={active ? "page" : undefined}
+                className={`relative flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm font-medium transition-colors ${
+                  active ? "text-primary" : "text-on-surface-variant hover:text-on-surface"
                 } ${effectiveCollapsed ? "justify-center" : ""}`}
               >
-                <Icon name={item.icon} className="text-xl" />
-                {!effectiveCollapsed && <span>{item.label}</span>}
+                {active && (
+                  <m.span
+                    layoutId={`nav-pill-${variant}`}
+                    className="absolute inset-0 rounded-[var(--radius-control)] bg-primary/12 ring-1 ring-primary/25"
+                    transition={{ duration: 0.3, ease: ease.out }}
+                  />
+                )}
+                <Icon name={item.icon} className="relative text-xl" />
+                {!effectiveCollapsed && <span className="relative">{item.label}</span>}
               </Link>
             );
           })}

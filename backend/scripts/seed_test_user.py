@@ -115,11 +115,13 @@ def main() -> int:
     now = datetime.now(IST)
     slots = {"breakfast": 8, "lunch": 13, "dinner": 20, "snack": 17}
     food_rows, water_rows, weight_rows = [], [], []
-    for day in range(35, 0, -1):
+    for day in range(35, -1, -1):
         d = (now - timedelta(days=day)).replace(minute=15, second=0, microsecond=0)
-        if rng.random() < 0.12:  # an occasional skipped day
+        if day > 0 and rng.random() < 0.12:  # an occasional skipped day
             continue
         for meal, hour in slots.items():
+            if day == 0 and hour >= now.hour:  # today: only what has already happened
+                continue
             if meal == "snack" and rng.random() < 0.5:
                 continue
             for food in rng.sample(foods, k=rng.randint(1, 2)):
@@ -137,6 +139,8 @@ def main() -> int:
                     "logged_at": d.replace(hour=hour).astimezone(timezone.utc).isoformat(),
                 })
         for h in (9, 12, 15, 18, 21):
+            if day == 0 and h >= now.hour:
+                continue
             water_rows.append({
                 "user_id": ids["a"],
                 "volume_ml": rng.choice([250, 250, 500]),

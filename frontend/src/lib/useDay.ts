@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Achievements,
   Day,
@@ -45,10 +45,18 @@ export function useDay(date: string, enabled: boolean) {
   // refresh -- same role as the old `diaryVersion`.
   const [diaryVersion, setDiaryVersion] = useState(0);
 
+  // Entries the user deleted but whose server delete hasn't been sent yet
+  // (the Undo window). A background refetch must not bring them back.
+  const pendingDeletes = useRef(new Set<string>());
+
   const dayQuery = useQuery({
     queryKey: key,
     queryFn: () => fetchDay(date),
     enabled,
+    select: (d: Day) =>
+      pendingDeletes.current.size === 0
+        ? d
+        : { ...d, meals: d.meals.filter((l) => !pendingDeletes.current.has(l.id)) },
   });
   const day = dayQuery.data ?? null;
 
@@ -219,23 +227,50 @@ export function useDay(date: string, enabled: boolean) {
     [qc, key, patchDay, foodChanged],
   );
 
-  const deleteEntry = useCallback(
-    async (log: FoodLog) => {
+  // ---- delete with undo -------------------------------------------------
+  // hideEntry removes the row from the screen immediately; restoreEntry puts
+  // it back (Undo); commitDelete is called when the Undo window closes and
+  // performs the real delete, rolling the row back if the server refuses.
+  const hideEntry = useCallback(
+    (log: FoodLog) => {
       setActionError(null);
-      setLogActionBusy(log.id);
-      await qc.cancelQueries({ queryKey: key });
+      pendingDeletes.current.add(log.id);
+      qc.cancelQueries({ queryKey: key });
       patchDay((d) => ({ ...d, meals: d.meals.filter((l) => l.id !== log.id) }));
+    },
+    [qc, key, patchDay],
+  );
+
+  const restoreEntry = useCallback(
+    (log: FoodLog) => {
+      pendingDeletes.current.delete(log.id);
+      patchDay((d) =>
+        d.meals.some((l) => l.id === log.id)
+          ? d
+          : {
+              ...d,
+              meals: [...d.meals, log].sort((a, b) => a.logged_at.localeCompare(b.logged_at)),
+            },
+      );
+    },
+    [patchDay],
+  );
+
+  const commitDelete = useCallback(
+    async (log: FoodLog) => {
+      setLogActionBusy(log.id);
       try {
         await deleteFoodLog(log.id);
+        pendingDeletes.current.delete(log.id);
         foodChanged();
       } catch (err) {
-        patchDay((d) => ({ ...d, meals: [...d.meals, log] }));
+        restoreEntry(log);
         setActionError(friendlyMessage(err, "food-log-delete"));
       } finally {
         setLogActionBusy(null);
       }
     },
-    [qc, key, patchDay, foodChanged],
+    [foodChanged, restoreEntry],
   );
 
   const addSuggestion = useCallback(
@@ -297,7 +332,9 @@ export function useDay(date: string, enabled: boolean) {
     foodLogSuccess,
     foodLogError,
     saveEntry,
-    deleteEntry,
+    hideEntry,
+    restoreEntry,
+    commitDelete,
     addSuggestion,
   };
 }

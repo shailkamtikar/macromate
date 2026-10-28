@@ -5,7 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FoodLog, GlassSize, MealType } from "@/lib/api";
 import { browserTimezone, formatDayLong, isValidIso, localDateIso } from "@/lib/date";
 import { MEAL_TYPES, inferMealType } from "@/lib/servings";
+import { m } from "motion/react";
 import { DateStrip } from "@/components/DateStrip";
+import { Icon } from "@/components/Icon";
+import { EnergyHero, InsightCards } from "@/components/today/DayOverview";
+import { NumberTicker, Reveal, ease } from "@/components/ui/motion";
+import { useToast } from "@/components/ui/Toast";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import { DiaryMeal } from "@/components/DiaryMeal";
 import { FoodPicker } from "@/components/FoodPicker";
 import { NumericField } from "@/components/NumericField";
@@ -18,16 +24,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { useDay } from "@/lib/useDay";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
-
-const MACRO_ROWS: {
-  key: "protein_g" | "carbs_g" | "fat_g";
-  label: string;
-  colorVar: string;
-}[] = [
-  { key: "protein_g", label: "Protein", colorVar: "var(--color-protein)" },
-  { key: "carbs_g", label: "Carbs", colorVar: "var(--color-carbs)" },
-  { key: "fat_g", label: "Fat", colorVar: "var(--color-fat)" },
-];
 
 export default function TodayPage() {
   // useSearchParams needs a Suspense boundary; the skeleton doubles as its
@@ -72,7 +68,9 @@ function TodayPageInner() {
     foodLogSuccess,
     foodLogError,
     saveEntry,
-    deleteEntry,
+    hideEntry,
+    restoreEntry,
+    commitDelete,
     addSuggestion,
   } = useDay(date, !!session && !!profile);
 
@@ -81,11 +79,25 @@ function TodayPageInner() {
   // on the client (the server's clock/timezone isn't the user's).
   const [pickerMeal, setPickerMeal] = useState<MealType>("breakfast");
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  // On phones the picker is a bottom sheet opened by the floating "Add meal"
+  // button; on desktop it is always visible in the right-hand column.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const toast = useToast();
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only time-of-day default, deliberately not computed during SSR
     setPickerMeal(inferMealType());
   }, []);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPickerOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [pickerOpen]);
 
   useEffect(() => {
     if (!sessionLoading && !session) router.push("/login");
@@ -161,11 +173,6 @@ function TodayPageInner() {
     water_goal_ml: profile.water_goal_ml,
     is_approximate: false,
   };
-  const remainingCalories = Math.max(targets.calories - consumed.calories, 0);
-  const percentOfTarget = Math.min(
-    Math.round((consumed.calories / targets.calories) * 100),
-    100,
-  );
   const waterGoal = targets.water_goal_ml ?? profile.water_goal_ml ?? 2500;
   const waterTotal = water?.total_ml ?? 0;
   // Distinguishes "genuinely 0 ml logged" from "hasn't loaded yet" --
@@ -181,30 +188,36 @@ function TodayPageInner() {
   const handleSaveEntry = saveEntry;
   const handleSuggestionAdd = addSuggestion;
 
-  async function handleDeleteEntry(log: FoodLog) {
-    if (!window.confirm(`Remove ${log.food_name} from ${isToday ? "today's" : "this day's"} diary?`)) return;
-    await deleteEntry(log);
+  // Deleting is instant and undoable: the entry disappears right away and the
+  // real delete only goes to the server once the "Undo" toast expires
+  // (see ToastProvider) -- no confirm() dialog needed.
+  function handleDeleteEntry(log: FoodLog) {
+    hideEntry(log);
+    toast.show(`Removed ${log.food_name}`, {
+      actionLabel: "Undo",
+      onAction: () => restoreEntry(log),
+      onExpire: () => commitDelete(log),
+    });
   }
 
   function focusPickerOn(meal: MealType) {
     setPickerMeal(meal);
-    pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (isDesktop) pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    else setPickerOpen(true);
   }
 
   return (
-    <main className="flex flex-1 justify-center px-4 py-6 sm:px-6">
-      <div className="w-full max-w-2xl space-y-4 lg:max-w-6xl">
-        <header className="flex items-start justify-between pt-1">
+    <main className="flex flex-1 justify-center px-4 pb-10 pt-6 sm:px-6">
+      <div className="w-full max-w-2xl space-y-5 lg:max-w-6xl">
+        <header className="flex items-start justify-between gap-4 pt-1">
           <div>
-            <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
-              {formatDayLong(date)}
-            </p>
-            <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
+            <p className="eyebrow">{formatDayLong(date)}</p>
+            <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-on-surface sm:text-4xl">
               {isToday ? "Today's Diary" : "Diary"}
             </h1>
             {!isToday && (
-              <p className="mt-1 flex items-center gap-2 text-xs text-on-surface-variant">
-                <span className="rounded-full bg-surface-container px-2 py-0.5 font-medium">
+              <p className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
+                <span className="rounded-full bg-surface-container px-2.5 py-1 font-medium">
                   Viewing a past day
                 </span>
                 <button
@@ -220,8 +233,6 @@ function TodayPageInner() {
           {isToday && achievements && <StreakChip achievements={achievements} />}
         </header>
 
-        <DateStrip selected={date} today={today} onSelect={selectDate} />
-
         {loadError && (
           <p className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat">
             {loadError}{" "}
@@ -231,110 +242,31 @@ function TodayPageInner() {
           </p>
         )}
         {actionError && (
-          <p className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat">
+          <p
+            role="alert"
+            className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat"
+          >
             {actionError}
           </p>
         )}
 
-        <div className="lg:grid lg:grid-cols-3 lg:items-start lg:gap-4">
+        <DateStrip selected={date} today={today} onSelect={selectDate} />
+
+        <div className="lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
           {/* Diary column */}
-          <div className="space-y-4 lg:col-span-2">
-            {/* Daily totals */}
+          <div className="space-y-5 lg:col-span-2">
             {foodLogs === null ? (
               <EnergyCardSkeleton />
             ) : (
-            <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    Energy budget
-                  </p>
-                  <div className="mt-0.5 flex items-baseline gap-1">
-                    <span className="font-display text-3xl font-bold tracking-tight text-on-surface">
-                      {remainingCalories}
-                    </span>
-                    <span className="text-base font-medium text-on-surface-variant">
-                      kcal left
-                    </span>
-                  </div>
-                </div>
-                <div className="relative flex h-20 w-20 items-center justify-center">
-                  <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90 transform">
-                    <circle
-                      cx="38"
-                      cy="38"
-                      r="32"
-                      fill="transparent"
-                      stroke="var(--color-surface-container-high)"
-                      strokeWidth="7"
-                    />
-                    <circle
-                      cx="38"
-                      cy="38"
-                      r="32"
-                      fill="transparent"
-                      stroke="var(--color-primary)"
-                      strokeWidth="7"
-                      strokeLinecap="round"
-                      strokeDasharray={201.06}
-                      strokeDashoffset={201.06 * (1 - percentOfTarget / 100)}
-                      className="transition-all duration-700"
-                    />
-                  </svg>
-                  <span className="absolute text-sm font-bold text-on-surface">
-                    {percentOfTarget}%
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2 rounded-[var(--radius-control)] bg-surface-container-low p-2">
-                <div className="px-2 py-1">
-                  <p className="text-xs text-on-surface-variant">Consumed</p>
-                  <p className="font-semibold text-on-surface" data-testid="consumed-calories">
-                    {Math.round(consumed.calories)}{" "}
-                    <span className="text-xs font-normal text-on-surface-variant">kcal</span>
-                  </p>
-                </div>
-                <div className="px-2 py-1">
-                  <p className="text-xs text-on-surface-variant">Daily goal</p>
-                  <p className="font-semibold text-on-surface">
-                    {targets.calories}{" "}
-                    <span className="text-xs font-normal text-on-surface-variant">kcal</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2">
-                {MACRO_ROWS.map(({ key, label, colorVar }) => {
-                  const target = (targets[key] ?? 0) as number;
-                  const value = consumed[key];
-                  const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
-                  return (
-                    <div key={key} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="flex items-center gap-1.5 font-semibold text-on-surface">
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: colorVar }}
-                          />
-                          {label}
-                        </span>
-                        <span className="text-on-surface-variant">
-                          <strong className="text-on-surface">{Math.round(value)}g</strong> /{" "}
-                          {target}g
-                        </span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{ width: `${pct}%`, backgroundColor: colorVar }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+              <>
+                <EnergyHero consumed={consumed} targets={targets} isToday={isToday} />
+                <InsightCards
+                  consumed={consumed}
+                  targets={targets}
+                  waterMl={waterTotal}
+                  waterGoalMl={waterGoal}
+                />
+              </>
             )}
 
             {!isToday && targets.is_approximate && (
@@ -355,7 +287,7 @@ function TodayPageInner() {
                 {foodLogs.length === 0 && (
                   <div
                     data-testid="empty-day"
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-card)] border border-dashed border-outline-variant bg-surface-container-lowest p-4"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-dashed border-outline-variant bg-surface-container-lowest p-4"
                   >
                     <p className="text-sm text-on-surface-variant">
                       {isToday ? "Nothing logged yet today." : "Nothing was logged on this day."}
@@ -363,35 +295,63 @@ function TodayPageInner() {
                     <button
                       type="button"
                       onClick={() => focusPickerOn(pickerMeal)}
-                      className="rounded-[var(--radius-control)] bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary"
+                      className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-on-primary transition-transform active:scale-95"
                     >
                       {isToday ? "Add food" : "Add food for this day"}
                     </button>
                   </div>
                 )}
-                {MEAL_TYPES.map((meal) => (
-                  <DiaryMeal
-                    key={meal}
-                    meal={meal}
-                    entries={mealsByType[meal]}
-                    busyLogId={logActionBusy}
-                    onSave={handleSaveEntry}
-                    onDelete={handleDeleteEntry}
-                    onAddFood={focusPickerOn}
-                  />
+                {MEAL_TYPES.map((meal, i) => (
+                  <Reveal key={meal} index={i}>
+                    <DiaryMeal
+                      meal={meal}
+                      entries={mealsByType[meal]}
+                      busyLogId={logActionBusy}
+                      onSave={handleSaveEntry}
+                      onDelete={handleDeleteEntry}
+                      onAddFood={focusPickerOn}
+                    />
+                  </Reveal>
                 ))}
               </div>
             )}
           </div>
 
           {/* Logging column */}
-          <div className="mt-4 space-y-4 lg:mt-0">
-            <div ref={pickerRef}>
+          <div className="mt-5 space-y-5 lg:sticky lg:top-6 lg:mt-0">
+            {pickerOpen && (
+              <div
+                className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+                onClick={() => setPickerOpen(false)}
+                aria-hidden="true"
+              />
+            )}
+            <div
+              ref={pickerRef}
+              inert={!isDesktop && !pickerOpen}
+              className={`max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-50 max-lg:max-h-[88dvh] max-lg:overflow-y-auto max-lg:rounded-t-[var(--radius-card)] max-lg:border-t max-lg:border-outline-variant max-lg:bg-surface max-lg:p-4 max-lg:pb-8 max-lg:transition-transform max-lg:duration-300 ${
+                pickerOpen ? "max-lg:translate-y-0" : "max-lg:translate-y-[105%]"
+              }`}
+            >
+              <div className="mb-3 flex items-center justify-between lg:hidden">
+                <p className="font-display text-base font-bold text-on-surface">Add food</p>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(false)}
+                  aria-label="Close"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container"
+                >
+                  <Icon name="close" className="text-lg" />
+                </button>
+              </div>
               <FoodPicker
                 meal={pickerMeal}
                 onMealChange={setPickerMeal}
                 onLogStart={handleFoodLogStart}
-                onLogSuccess={handleFoodLogSuccess}
+                onLogSuccess={(tempId, real) => {
+                  handleFoodLogSuccess(tempId, real);
+                  setPickerOpen(false);
+                }}
                 onLogError={handleFoodLogError}
                 refreshKey={diaryVersion}
                 logDate={isToday ? undefined : date}
@@ -420,9 +380,29 @@ function TodayPageInner() {
           </div>
         </div>
       </div>
+
+      {/* Floating "Add meal" -- phones only; on desktop the picker is always
+          visible in the right-hand column. */}
+      <m.button
+        type="button"
+        onClick={() => setPickerOpen(true)}
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        whileTap={{ scale: 0.95 }}
+        transition={{ duration: 0.4, ease: ease.out, delay: 0.3 }}
+        data-testid="add-meal-fab"
+        className="fixed bottom-24 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-on-surface px-6 py-3.5 text-sm font-semibold text-surface shadow-xl lg:hidden"
+      >
+        <Icon name="add" className="text-lg" />
+        Add meal
+      </m.button>
     </main>
   );
 }
+
+/** Plain integer (no thousands separator): this figure is also read by tests
+ * and screen readers as a simple number. */
+const plainInt = (n: number) => String(Math.round(n));
 
 function WaterCard({
   totalMl,
@@ -439,7 +419,7 @@ function WaterCard({
   onQuickLog: (ml: number) => void;
   onRemove: (ml: number) => void;
   onAddGlassSize: (label: string, volumeMl: number) => void;
-  /** True only until the initial water fetch resolves -- NOT held during a
+  /** True only until the initial day fetch resolves -- NOT held during a
    * mutation's own round-trip (those are optimistic and stay interactive).
    * Without this, a click in that brief initial window would silently
    * no-op (see the comment on `waterLoaded` in the parent). */
@@ -456,10 +436,13 @@ function WaterCard({
     setLabel("");
   }
 
-  const quickOptions = glassSizes.length > 0 ? glassSizes : [
-    { id: "default-250", label: "250ml", volume_ml: 250 },
-    { id: "default-500", label: "500ml", volume_ml: 500 },
-  ];
+  const quickOptions =
+    glassSizes.length > 0
+      ? glassSizes
+      : [
+          { id: "default-250", label: "250ml", volume_ml: 250 },
+          { id: "default-500", label: "500ml", volume_ml: 500 },
+        ];
   // The smallest configured container is what "a glass" means for this
   // user — visualizing hydration in terms of a 1000ml "big bottle" reads
   // wrong ("2 bottles" isn't the mental model "glasses" implies).
@@ -471,19 +454,20 @@ function WaterCard({
   const glassesGoal = unitMl > 0 ? Math.max(1, Math.round(goalMl / unitMl)) : 1;
 
   return (
-    <section className="rounded-[var(--radius-card)] border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-      <div className="flex items-center justify-between">
+    <section className="card p-5">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-on-surface">Hydration</h3>
-          <p className="text-xs text-on-surface-variant">
+          <p className="eyebrow">Hydration</p>
+          <p className="mt-1 text-xs text-on-surface-variant">
             {Math.round(glassesDone * 10) / 10} of {glassesGoal} glasses · {unitMl} ml each
           </p>
         </div>
         <span
           data-testid="water-total"
-          className="font-display text-lg font-bold text-water"
+          className="font-display text-2xl font-extrabold text-water"
         >
-          {totalMl} <span className="text-xs font-normal text-on-surface-variant">ml</span>
+          <NumberTicker value={totalMl} format={plainInt} />{" "}
+          <span className="text-xs font-normal text-on-surface-variant">ml</span>
         </span>
       </div>
       <p className="mt-0.5 text-xs text-on-surface-variant">Daily target: {goalMl} ml</p>
@@ -503,14 +487,14 @@ function WaterCard({
             key={g.id}
             onClick={() => onQuickLog(g.volume_ml)}
             disabled={disabled}
-            className="rounded-[var(--radius-control)] bg-surface-container-low px-3 py-1.5 text-xs font-semibold text-water disabled:opacity-50"
+            className="rounded-full bg-water/10 px-3.5 py-1.5 text-xs font-semibold text-water transition-transform hover:bg-water/15 active:scale-95 disabled:opacity-50"
           >
             +{g.volume_ml}ml
           </button>
         ))}
         <button
           onClick={() => setAddingSize((v) => !v)}
-          className="rounded-[var(--radius-control)] border border-dashed border-outline-variant px-3 py-1.5 text-xs font-medium text-on-surface-variant"
+          className="rounded-full border border-dashed border-outline-variant px-3.5 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface"
         >
           + Custom size
         </button>

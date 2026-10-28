@@ -545,6 +545,9 @@ export interface DaySummary {
   fat_g: number;
   water_ml: number;
   target_calories: number;
+  target_protein_g: number | null;
+  target_carbs_g: number | null;
+  target_fat_g: number | null;
   status: { calories: DayStatus; protein: DayStatus; carbs: DayStatus; fat: DayStatus };
 }
 

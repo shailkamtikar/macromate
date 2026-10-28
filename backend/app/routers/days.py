@@ -78,6 +78,9 @@ class DaySummaryOut(BaseModel):
     fat_g: float
     water_ml: float
     target_calories: int
+    target_protein_g: int | None
+    target_carbs_g: int | None
+    target_fat_g: int | None
     status: StatusOut
 
 
@@ -182,6 +185,9 @@ def days_summary(
                 fat_g=round(totals["fat_g"], 1),
                 water_ml=round(totals["water"], 1),
                 target_calories=targets.calories,
+                target_protein_g=targets.protein_g,
+                target_carbs_g=targets.carbs_g,
+                target_fat_g=targets.fat_g,
                 status=_statuses(totals, targets),
             )
         )

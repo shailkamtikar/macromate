@@ -79,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             by that button on any viewport narrower than the lg breakpoint.
             pt-16 clears it with a little breathing room; lg:pt-0 removes
             it entirely once the floating button itself is hidden. */}
-        <div className="flex flex-1 flex-col pt-16 lg:pt-0">{children}</div>
+        <div className="flex flex-1 flex-col pb-28 pt-16 lg:pb-0 lg:pt-0">{children}</div>
         <BottomNav />
       </div>
     </div>
