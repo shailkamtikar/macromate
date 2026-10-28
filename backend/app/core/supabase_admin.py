@@ -84,6 +84,19 @@ class SupabaseAdmin:
     def select(self, table: str, params: dict) -> list[dict]:
         return self._request("GET", table, params=params).json()
 
+    def select_all(self, table: str, params: dict, page_size: int = 1000) -> list[dict]:
+        """Like `select`, but pages through results: PostgREST caps a single
+        response (1000 rows by default) and silently truncates beyond it,
+        which would under-count a long date range."""
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            page = self.select(table, {**params, "limit": str(page_size), "offset": str(offset)})
+            rows.extend(page)
+            if len(page) < page_size:
+                return rows
+            offset += page_size
+
     def insert(
         self,
         table: str,
