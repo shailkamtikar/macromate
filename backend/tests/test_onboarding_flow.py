@@ -57,47 +57,50 @@ def real_user():
 
 
 def test_onboarding_persists_profile_and_first_weight_log(real_user):
-    headers = {
-        "apikey": settings.supabase_anon_key,
-        "Authorization": f"Bearer {real_user['token']}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=representation",
-    }
+    """Onboarding goes through PUT /api/profile (the server computes and stores
+    the targets and the first weight log); the browser reads its own profile
+    back directly and can no longer write either itself."""
+    from fastapi.testclient import TestClient
 
-    profile_resp = httpx.post(
-        f"{settings.supabase_url}/rest/v1/profiles",
-        headers=headers,
+    from app.main import app
+
+    api_headers = {"Authorization": f"Bearer {real_user['token']}"}
+    client = TestClient(app)
+    saved = client.put(
+        "/api/profile",
+        headers=api_headers,
         json={
-            "id": real_user["id"],
             "username": f"tester_{uuid.uuid4().hex[:6]}",
             "sex": "male",
             "age_years": 28,
             "height_cm": 178,
+            "weight_kg": 75,
             "activity_level": "moderate",
             "goal": "maintain",
-            "target_calories": 2400,
-            "target_protein_g": 160,
-            "target_carbs_g": 260,
-            "target_fat_g": 70,
         },
-        timeout=15,
     )
-    assert profile_resp.status_code == 201, profile_resp.text
+    assert saved.status_code == 200, saved.text
+    expected_calories = saved.json()["profile"]["target_calories"]
+    assert expected_calories > 1200
 
-    weight_resp = httpx.post(
-        f"{settings.supabase_url}/rest/v1/weight_logs",
-        headers={**headers, "Prefer": "return=representation"},
-        json={"user_id": real_user["id"], "weight_kg": 75},
-        timeout=15,
-    )
-    assert weight_resp.status_code == 201, weight_resp.text
-
+    rest = {
+        "apikey": settings.supabase_anon_key,
+        "Authorization": f"Bearer {real_user['token']}",
+        "Content-Type": "application/json",
+    }
     read_resp = httpx.get(
         f"{settings.supabase_url}/rest/v1/profiles?id=eq.{real_user['id']}",
-        headers=headers,
+        headers=rest,
         timeout=15,
     )
     assert read_resp.status_code == 200
     rows = read_resp.json()
     assert len(rows) == 1
-    assert rows[0]["target_calories"] == 2400
+    assert rows[0]["target_calories"] == expected_calories
+
+    weights = httpx.get(
+        f"{settings.supabase_url}/rest/v1/weight_logs?user_id=eq.{real_user['id']}",
+        headers=rest,
+        timeout=15,
+    ).json()
+    assert [w["weight_kg"] for w in weights] == [75]
