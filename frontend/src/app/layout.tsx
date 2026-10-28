@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { WarmPing } from "@/components/WarmPing";
 import { ProfileProvider } from "@/lib/ProfileProvider";
 import { SessionProvider } from "@/lib/SessionProvider";
 import { THEME_COOKIE_NAME } from "@/lib/theme";
@@ -86,6 +87,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="flex min-h-full flex-col bg-surface text-on-surface font-body">
         <ServiceWorkerRegistration />
+        <WarmPing />
         <SessionProvider>
           <ProfileProvider>
             <AppShell>{children}</AppShell>

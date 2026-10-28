@@ -33,6 +33,7 @@ import { WaterGlasses } from "@/components/WaterGlasses";
 import { StreakChip } from "@/components/AchievementsCard";
 import { Skeleton } from "@/components/Skeleton";
 import { SuggestionsCard } from "@/components/SuggestionsCard";
+import { SlowStartHint } from "@/components/WarmPing";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
@@ -736,6 +737,7 @@ function TodaySkeleton() {
         <div className="space-y-2 pt-1">
           <Skeleton className="h-3 w-32" />
           <Skeleton className="h-6 w-44" />
+          <SlowStartHint />
         </div>
         <div className="lg:grid lg:grid-cols-3 lg:items-start lg:gap-4">
           <div className="space-y-4 lg:col-span-2">
