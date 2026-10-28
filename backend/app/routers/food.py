@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.auth import CurrentUserDep
+from app.core.cache import invalidate_user
 from app.core.supabase_admin import SupabaseAdmin, SupabaseAdminError
 from app.domain.food import (
     compute_nutrition_snapshot,
@@ -368,6 +369,7 @@ def log_food(payload: LogFoodRequest, current_user: CurrentUserDep) -> FoodLogOu
         },
     )[0]
 
+    invalidate_user(current_user.user_id, "suggestions")
     return _food_log_out(row, food_item)
 
 
@@ -452,6 +454,7 @@ def update_food_log(
         changes,
     )[0]
 
+    invalidate_user(current_user.user_id, "suggestions")
     return _food_log_out(row, existing.get("food_items"))
 
 
@@ -472,3 +475,4 @@ def delete_food_log(log_id: str, current_user: CurrentUserDep) -> None:
         "food_logs",
         params={"id": f"eq.{log_id}", "user_id": f"eq.{current_user.user_id}"},
     )
+    invalidate_user(current_user.user_id, "suggestions")

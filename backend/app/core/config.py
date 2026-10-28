@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     gemini_primary_model: str = "gemini-3.6-flash"
     gemini_fallback_model: str = "gemini-3.5-flash-lite"
 
+    # In-process read cache (app/core/cache.py). Tests that write straight
+    # to the database bypass cache invalidation, so conftest turns it off.
+    cache_enabled: bool = True
+
     # Max Gemini calls in flight at once (see app/core/gemini.py).
     ai_max_concurrency: int = 4
 

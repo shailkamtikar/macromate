@@ -5,9 +5,16 @@ CI); `uv run pytest -m live` runs the rest against whatever Supabase project
 `backend/.env` points at -- which must be the TEST project, never production.
 """
 
+import os
 from pathlib import Path
 
 import pytest
+
+# Live tests write rows straight to the database (bypassing the API's cache
+# invalidation), so the read cache is off for the whole suite. Its behaviour
+# is covered by tests/test_cache.py and tests/test_suggestions_cache.py,
+# which enable it explicitly.
+os.environ.setdefault("CACHE_ENABLED", "false")
 
 _LIVE_MARKERS = (
     "supabase_service_role_key",

@@ -1,7 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.auth import CurrentUserDep
+from app.core.cache import get_cached, set_cached
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.macros import MacroTargets, calculate_remaining_macros
 from app.domain.suggestions import SuggestionCandidate, rank_candidates
@@ -28,6 +31,17 @@ _CANDIDATE_POOL_LIMIT = 20
 _PERSONAL_HISTORY_LIMIT = 15
 
 FINAL_SUGGESTION_LIMIT = 3
+
+# Short-lived per-user cache (see app/core/cache.py). Food-log writes
+# invalidate it, so "what's left" is never stale after the user logs
+# something; the TTL only bounds staleness from profile-target edits.
+SUGGESTIONS_CACHE_NS = "suggestions"
+SUGGESTIONS_CACHE_TTL_SECONDS = 45
+
+# The three reads below are independent of each other once the user's
+# timezone is known, so they run concurrently (one network round-trip of
+# latency instead of three in a row).
+_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="suggestions")
 
 
 class SuggestedFood(BaseModel):
@@ -103,21 +117,33 @@ def _personal_history_candidates(db: SupabaseAdmin, user_id: str) -> list[Sugges
 
 @router.get("/suggestions", response_model=SuggestionsResponse)
 def get_suggestions(current_user: CurrentUserDep) -> SuggestionsResponse:
+    cached = get_cached(SUGGESTIONS_CACHE_NS, current_user.user_id, SUGGESTIONS_CACHE_TTL_SECONDS)
+    if cached is not None:
+        return cached
+    response = _build_suggestions(current_user.user_id)
+    set_cached(SUGGESTIONS_CACHE_NS, current_user.user_id, response, SUGGESTIONS_CACHE_TTL_SECONDS)
+    return response
+
+
+def _build_suggestions(user_id: str) -> SuggestionsResponse:
     db = SupabaseAdmin()
 
-    profiles = db.select("profiles", {"id": f"eq.{current_user.user_id}", "select": "*"})
+    profiles = db.select("profiles", {"id": f"eq.{user_id}", "select": "*"})
     profile = profiles[0] if profiles else None
 
     tz_name = (profile.get("timezone") if profile else None) or "UTC"
     today = local_today(tz_name)
     day_start, day_end = day_bounds_utc(today, tz_name)
-    food_logs = db.select(
+    food_logs_future = _pool.submit(
+        db.select,
         "food_logs",
         {
-            "user_id": f"eq.{current_user.user_id}",
+            "user_id": f"eq.{user_id}",
             "logged_at": [f"gte.{day_start.isoformat()}", f"lt.{day_end.isoformat()}"],
         },
     )
+    personal_future = _pool.submit(_personal_history_candidates, db, user_id)
+    food_logs = food_logs_future.result()
     consumed_calories = sum(f["calories"] for f in food_logs)
     consumed_protein = sum(f["protein_g"] for f in food_logs)
     consumed_carbs = sum(f["carbs_g"] for f in food_logs)
@@ -165,7 +191,7 @@ def get_suggestions(current_user: CurrentUserDep) -> SuggestionsResponse:
         "suggest_foods_for_remaining",
         {"remaining_calories": remaining.calories, "pool_limit": _CANDIDATE_POOL_LIMIT},
     )
-    personal_candidates = _personal_history_candidates(db, current_user.user_id)
+    personal_candidates = personal_future.result()
 
     candidates: dict[str, SuggestionCandidate] = {
         row["id"]: _to_candidate(row, is_personal_history=False) for row in global_rows

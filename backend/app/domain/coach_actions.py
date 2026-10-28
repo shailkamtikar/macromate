@@ -11,6 +11,7 @@ success.
 
 from dataclasses import dataclass
 
+from app.core.cache import invalidate_user
 from app.core.supabase_admin import SupabaseAdmin
 from app.domain.ai_food_parser import ParsedFoodItem
 from app.domain.food import compute_nutrition_snapshot
@@ -120,6 +121,8 @@ def execute_add_food(
         )
         total_calories += snapshot.calories
 
+    if logged:
+        invalidate_user(user_id, "suggestions")
     return AddFoodResult(meal_type=meal_type, logged=logged, total_calories=total_calories)
 
 
@@ -171,6 +174,7 @@ def execute_remove_food(db: SupabaseAdmin, user_id: str, description: str) -> Re
         "food_logs",
         params={"id": f"eq.{target['id']}", "user_id": f"eq.{user_id}"},
     )
+    invalidate_user(user_id, "suggestions")
     return RemoveFoodResult(removed=True, food_name=(target.get("food_items") or {}).get("name"))
 
 

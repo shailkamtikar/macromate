@@ -7,9 +7,33 @@ RLS a second time for server-issued requests. Never expose this key or a
 client built from it to the frontend.
 """
 
+import threading
+
 import httpx
 
 from app.core.config import get_settings
+
+# One pooled, keep-alive client for the whole process. Previously every call
+# used `httpx.request(...)`, which opens a brand-new TCP+TLS connection each
+# time (40-190 ms) and an endpoint makes 2-10 sequential calls. The client is
+# thread-safe, so FastAPI's worker threads share it. HTTP/1.1 keep-alive on
+# purpose: concurrent calls from worker threads over a single multiplexed
+# HTTP/2 connection deadlocked in testing. Created lazily so tests
+# that change settings still work.
+_client: httpx.Client | None = None
+_client_lock = threading.Lock()
+
+
+def _shared_client() -> httpx.Client:
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = httpx.Client(
+                    timeout=15,
+                    limits=httpx.Limits(max_connections=40, max_keepalive_connections=20),
+                )
+    return _client
 
 
 def service_headers(key: str) -> dict[str, str]:
@@ -46,13 +70,12 @@ class SupabaseAdmin:
         headers = dict(self._headers)
         if prefer:
             headers["Prefer"] = prefer
-        resp = httpx.request(
+        resp = _shared_client().request(
             method,
             f"{self._base_url}/{path}",
             headers=headers,
             params=params,
             json=json,
-            timeout=15,
         )
         if resp.status_code >= 400:
             raise SupabaseAdminError(resp.status_code, resp.text)
