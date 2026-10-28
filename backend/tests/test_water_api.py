@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 def _create_and_sign_in_user():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-water-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"

@@ -12,6 +12,17 @@ import httpx
 from app.core.config import get_settings
 
 
+def service_headers(key: str) -> dict[str, str]:
+    """Request headers for the service-role/secret key. Legacy service_role
+    keys are JWTs and go in both `apikey` and `Authorization: Bearer`; the
+    newer `sb_secret_...` keys are opaque and must be sent in `apikey` only
+    (the gateway rejects them as a Bearer token)."""
+    headers = {"apikey": key, "Content-Type": "application/json"}
+    if not key.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
 class SupabaseAdminError(Exception):
     def __init__(self, status_code: int, detail: str):
         super().__init__(f"Supabase REST error {status_code}: {detail}")
@@ -27,11 +38,7 @@ class SupabaseAdmin:
                 "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured"
             )
         self._base_url = f"{settings.supabase_url}/rest/v1"
-        self._headers = {
-            "apikey": settings.supabase_service_role_key,
-            "Authorization": f"Bearer {settings.supabase_service_role_key}",
-            "Content-Type": "application/json",
-        }
+        self._headers = service_headers(settings.supabase_service_role_key)
 
     def _request(
         self, method: str, path: str, *, params=None, json=None, prefer=None

@@ -42,7 +42,7 @@ def _delete_ai_estimate_food_items_for_user(db: SupabaseAdmin, user_id: str) -> 
 def user_id():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-coachaction-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -197,7 +197,7 @@ def test_add_food_ai_estimate_food_is_not_matched_for_a_different_user(db, user_
         f"{settings.supabase_url}/auth/v1/admin/users",
         headers={
             "apikey": settings.supabase_service_role_key,
-            "Authorization": f"Bearer {settings.supabase_service_role_key}",
+            **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
         },
         json={
             "email": f"macromate-coachaction-other2-{uuid.uuid4().hex[:10]}@example.com",
@@ -229,7 +229,7 @@ def test_add_food_ai_estimate_food_is_not_matched_for_a_different_user(db, user_
             f"{settings.supabase_url}/auth/v1/admin/users/{other_user_id}",
             headers={
                 "apikey": settings.supabase_service_role_key,
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
             },
             timeout=15,
         )
@@ -355,7 +355,7 @@ def test_remove_food_only_matches_todays_own_logs_for_this_user(db, seeded, user
         f"{settings.supabase_url}/auth/v1/admin/users",
         headers={
             "apikey": settings.supabase_service_role_key,
-            "Authorization": f"Bearer {settings.supabase_service_role_key}",
+            **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
         },
         json={
             "email": f"macromate-coachaction-other-{uuid.uuid4().hex[:10]}@example.com",
@@ -393,7 +393,7 @@ def test_remove_food_only_matches_todays_own_logs_for_this_user(db, seeded, user
             f"{settings.supabase_url}/auth/v1/admin/users/{other_user_id}",
             headers={
                 "apikey": settings.supabase_service_role_key,
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
             },
             timeout=15,
         )

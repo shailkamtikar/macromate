@@ -25,7 +25,7 @@ pytestmark = pytest.mark.skipif(
 def onboarded_user():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-suggest-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -78,7 +78,7 @@ def second_onboarded_user():
     """A second, independent user for cross-user privacy tests."""
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-suggest-test2-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -587,7 +587,7 @@ def legitimately_owned_food():
     global custom foods."""
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-suggest-owner-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"

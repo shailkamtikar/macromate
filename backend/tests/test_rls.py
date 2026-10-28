@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 def _create_and_sign_in_user():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-rls-test-{uuid.uuid4().hex[:12]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -117,7 +117,7 @@ def test_user_can_only_see_own_food_logs(two_users):
     a, b = two_users["a"], two_users["b"]
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
 
     food_resp = httpx.post(
@@ -272,7 +272,7 @@ def test_food_items_are_globally_readable_but_only_creator_can_edit_unverified(
     a, b = two_users["a"], two_users["b"]
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
 
     create_resp = httpx.post(

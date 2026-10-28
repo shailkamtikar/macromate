@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 def real_access_token():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-test-{uuid.uuid4().hex[:12]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"

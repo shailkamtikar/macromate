@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 def _create_onboarded_user(username_prefix: str):
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-friend-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -74,7 +74,7 @@ def two_users():
     b = _create_onboarded_user("friendb")
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     try:
         yield {"a": a, "b": b}

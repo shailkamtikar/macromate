@@ -39,7 +39,7 @@ requires_gemini = pytest.mark.skipif(
 def auth_headers():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-aifood-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -396,7 +396,7 @@ def test_empty_input_is_rejected_before_any_gemini_call(client, auth_headers, mo
 def second_auth_headers():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-aifood-test2-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"

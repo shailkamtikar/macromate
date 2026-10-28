@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 def onboarded_user():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-coach-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -86,7 +86,7 @@ def client():
 def _create_onboarded_user():
     admin_headers = {
         "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
     }
     email = f"macromate-coach-test-{uuid.uuid4().hex[:10]}@example.com"
     password = f"Tt{uuid.uuid4().hex}!1"
@@ -158,7 +158,7 @@ def onboarded_user_full():
             f"{settings.supabase_url}/auth/v1/admin/users/{user_id}",
             headers={
                 "apikey": settings.supabase_service_role_key,
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
             },
             timeout=15,
         )
@@ -681,7 +681,7 @@ def test_coach_history_never_leaks_between_users(client, onboarded_user_full, mo
             f"{settings.supabase_url}/auth/v1/admin/users/{other_id}",
             headers={
                 "apikey": settings.supabase_service_role_key,
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
             },
             timeout=15,
         )
@@ -785,7 +785,7 @@ def test_coach_action_only_affects_the_authenticated_users_own_data(
             f"{settings.supabase_url}/auth/v1/admin/users/{other_user_id}",
             headers={
                 "apikey": settings.supabase_service_role_key,
-                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                **({} if settings.supabase_service_role_key.startswith("sb_secret_") else {"Authorization": f"Bearer {settings.supabase_service_role_key}"}),
             },
             timeout=15,
         )
