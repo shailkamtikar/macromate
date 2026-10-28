@@ -1,31 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import {
-  Achievements,
-  FoodLog,
-  GlassSize,
-  MealType,
-  SuggestedFood,
-  SuggestionsResponse,
-  WaterSummary,
-  createGlassSize,
-  deleteFoodLog,
-  fetchAchievements,
-  fetchFoodLogs,
-  fetchGlassSizes,
-  fetchSuggestions,
-  fetchWaterLogs,
-  logFood,
-  logWater,
-  removeWater,
-  updateFoodLog,
-} from "@/lib/api";
-import { browserTimezone, localDateIso as todayIso } from "@/lib/date";
-import { friendlyMessage } from "@/lib/errors";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FoodLog, GlassSize, MealType } from "@/lib/api";
+import { browserTimezone, formatDayLong, isValidIso, localDateIso } from "@/lib/date";
 import { MEAL_TYPES, inferMealType } from "@/lib/servings";
-import { nextTempId } from "@/lib/tempId";
+import { DateStrip } from "@/components/DateStrip";
 import { DiaryMeal } from "@/components/DiaryMeal";
 import { FoodPicker } from "@/components/FoodPicker";
 import { NumericField } from "@/components/NumericField";
@@ -35,6 +15,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { SuggestionsCard } from "@/components/SuggestionsCard";
 import { SlowStartHint } from "@/components/WarmPing";
 import { supabase } from "@/lib/supabaseClient";
+import { useDay } from "@/lib/useDay";
 import { useProfile } from "@/lib/useProfile";
 import { useSession } from "@/lib/useSession";
 
@@ -49,36 +30,57 @@ const MACRO_ROWS: {
 ];
 
 export default function TodayPage() {
+  // useSearchParams needs a Suspense boundary; the skeleton doubles as its
+  // fallback so there is never a blank frame.
+  return (
+    <Suspense fallback={<TodaySkeleton />}>
+      <TodayPageInner />
+    </Suspense>
+  );
+}
+
+function TodayPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { session, loading: sessionLoading } = useSession();
   const profile = useProfile(session?.user.id);
 
-  const [foodLogs, setFoodLogs] = useState<FoodLog[] | null>(null);
-  const [water, setWater] = useState<WaterSummary | null>(null);
-  const [glassSizes, setGlassSizes] = useState<GlassSize[] | null>(null);
-  const [suggestions, setSuggestions] = useState<SuggestionsResponse | null>(null);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(true);
-  const [suggestionsError, setSuggestionsError] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [logActionBusy, setLogActionBusy] = useState<string | null>(null);
+  // The selected day lives in the URL (?date=YYYY-MM-DD) so it survives a
+  // reload, can be bookmarked/shared, and the back button works. Anything
+  // invalid or in the future falls back to today.
+  const today = localDateIso();
+  const rawDate = searchParams.get("date");
+  const date = isValidIso(rawDate) && rawDate <= today ? rawDate : today;
+
+  const {
+    day,
+    isToday,
+    loadError,
+    retry,
+    suggestions,
+    suggestionsLoading,
+    suggestionsError,
+    retrySuggestions,
+    achievements,
+    actionError,
+    logActionBusy,
+    diaryVersion,
+    quickWater,
+    undoWater,
+    addGlassSize,
+    foodLogStart,
+    foodLogSuccess,
+    foodLogError,
+    saveEntry,
+    deleteEntry,
+    addSuggestion,
+  } = useDay(date, !!session && !!profile);
 
   // Starts at a fixed value so the server-rendered markup is deterministic,
   // then snaps to the meal that matches the current time of day once we're
   // on the client (the server's clock/timezone isn't the user's).
   const [pickerMeal, setPickerMeal] = useState<MealType>("breakfast");
-  const [diaryVersion, setDiaryVersion] = useState(0);
-  const [achievements, setAchievements] = useState<Achievements | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
-  // Bumped synchronously by every optimistic mutation below. loadDay()'s
-  // Promise.all can take a while (fetchSuggestions in particular), and it
-  // only ever runs once on mount -- but "once on mount" can still resolve
-  // *after* a mutation the user fired off while it was in flight. Without
-  // this guard, that stale response would overwrite the fresher optimistic
-  // state with a pre-mutation snapshot.
-  // Per-domain now that the domains load independently: a water click must
-  // not discard a still-in-flight diary response (or vice versa).
-  const mutationVersion = useRef({ food: 0, water: 0, glass: 0 });
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only time-of-day default, deliberately not computed during SSR
@@ -105,82 +107,16 @@ export default function TodayPage() {
     }
   }, [profile, session]);
 
-  // Initial fetch. The diary, water and glass sizes load independently and
-  // each renders the moment *it* arrives -- previously one Promise.all made
-  // the whole page wait for the slowest call (suggestions). Suggestions are
-  // requested only once the core data has landed, so they never compete
-  // with it for the backend and never block it. Mutations afterwards use
-  // optimistic updates and targeted refetches of just the domain they affect.
-  async function loadDay() {
-    setLoadError(null);
-    const start = { ...mutationVersion.current };
-    const day = todayIso();
-    try {
-      await Promise.all([
-        fetchFoodLogs(day).then((logs) => {
-          if (mutationVersion.current.food !== start.food) return;
-          setFoodLogs(logs);
-          setDiaryVersion((v) => v + 1);
-        }),
-        fetchWaterLogs(day).then((summary) => {
-          if (mutationVersion.current.water !== start.water) return;
-          setWater(summary);
-        }),
-        fetchGlassSizes().then((glasses) => {
-          if (mutationVersion.current.glass !== start.glass) return;
-          setGlassSizes(glasses);
-        }),
-      ]);
-    } catch (err) {
-      setLoadError(friendlyMessage(err, "diary-load"));
-      setSuggestionsLoading(false);
-      return;
-    }
-    await loadSuggestions();
+  function selectDate(iso: string) {
+    const target = iso > today ? today : iso;
+    router.replace(target === today ? "/today" : `/today?date=${target}`, { scroll: false });
   }
 
-  async function loadSuggestions() {
-    setSuggestionsLoading(true);
-    setSuggestionsError(false);
-    try {
-      setSuggestions(await fetchSuggestions());
-    } catch {
-      setSuggestionsError(true);
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  }
-
-  // Suggestions depend on today's remaining calories/macros, so only a food
-  // mutation ever needs to refresh them -- never water or glass-size
-  // changes, which can't affect what's "left" to eat. Best-effort: a
-  // failure here shouldn't blow away an otherwise-successful food action.
-  async function refreshSuggestions() {
-    try {
-      setSuggestions(await fetchSuggestions());
-    } catch {
-      // Keep showing the previous suggestions rather than erroring the
-      // whole page over a non-critical, supplementary fetch.
-    }
-  }
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount, standard pattern
-    if (session && profile) loadDay();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadDay is recreated every render; the load is keyed on session/profile only
-  }, [session, profile]);
-
-  useEffect(() => {
-    // Lightweight, best-effort: the streak chip is a nice-to-have, so a
-    // failure here should never surface as a page error. Achievements
-    // (streak, calorie/macro goal hits) only depend on food logs, so this
-    // is keyed on diaryVersion, which now only bumps for food mutations --
-    // not water or glass-size changes, which can't affect it.
-    if (!session) return;
-    fetchAchievements()
-      .then(setAchievements)
-      .catch(() => {});
-  }, [session, diaryVersion]);
+  // Derived straight from the day's entries, so optimistic edits update the
+  // totals in the same render.
+  const foodLogs = day?.meals ?? null;
+  const water = day?.water ?? null;
+  const glassSizes = day?.glass_sizes ?? null;
 
   const consumed = useMemo(() => {
     const totals = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
@@ -205,11 +141,9 @@ export default function TodayPage() {
   }, [foodLogs]);
 
   // Session resolution is already handled once, app-wide, by AppShell's
-  // BootstrapLoader gate (see SessionProvider); profile is likewise
-  // resolved once per session by ProfileProvider, not refetched on every
-  // navigation -- so this branch is now a genuine, once-per-session
-  // bootstrap moment rather than something that would otherwise flash on
-  // every visit to Today, and the same branded loader is appropriate here.
+  // gate (see SessionProvider); profile is likewise resolved once per
+  // session by ProfileProvider -- so this is a genuine once-per-session
+  // bootstrap moment, shown as a page-shaped skeleton.
   if (sessionLoading || profile === undefined || !session) {
     return <TodaySkeleton />;
   }
@@ -217,174 +151,39 @@ export default function TodayPage() {
     return <p className="p-10 text-sm text-on-surface-variant">Redirecting to onboarding…</p>;
   }
 
-  const remainingCalories = Math.max(profile.target_calories - consumed.calories, 0);
+  // The day's own targets (history-aware); the profile's current targets
+  // only until the day has loaded.
+  const targets = day?.targets ?? {
+    calories: profile.target_calories,
+    protein_g: profile.target_protein_g,
+    carbs_g: profile.target_carbs_g,
+    fat_g: profile.target_fat_g,
+    water_goal_ml: profile.water_goal_ml,
+    is_approximate: false,
+  };
+  const remainingCalories = Math.max(targets.calories - consumed.calories, 0);
   const percentOfTarget = Math.min(
-    Math.round((consumed.calories / profile.target_calories) * 100),
+    Math.round((consumed.calories / targets.calories) * 100),
     100,
   );
-  const waterGoal = profile.water_goal_ml ?? 2500;
+  const waterGoal = targets.water_goal_ml ?? profile.water_goal_ml ?? 2500;
   const waterTotal = water?.total_ml ?? 0;
   // Distinguishes "genuinely 0 ml logged" from "hasn't loaded yet" --
-  // waterTotal alone can't, since both render as 0. A click in that brief
-  // initial window would otherwise optimistically no-op (setWater's
-  // functional update is a no-op while `water` is still null) with no
-  // visible feedback and no request correction until the next mutation.
+  // waterTotal alone can't, since both render as 0.
   const waterLoaded = water !== null;
 
-  // Water total is a plain sum, so the optimistic delta *is* the correct
-  // total (not a guess to be corrected) -- logWater's response doesn't
-  // carry an aggregate to reconcile against anyway. Rollback restores the
-  // exact delta rather than an older snapshot, so it can't clobber another
-  // still-in-flight water mutation.
-  async function handleQuickWater(volumeMl: number) {
-    setActionError(null);
-    mutationVersion.current.water += 1;
-    setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml + volumeMl } : prev));
-    try {
-      await logWater(volumeMl);
-    } catch (err) {
-      setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml - volumeMl } : prev));
-      setActionError(friendlyMessage(err, "water-log"));
-    }
-  }
-
-  async function handleRemoveWater(volumeMl: number) {
-    setActionError(null);
-    mutationVersion.current.water += 1;
-    setWater((prev) => (prev ? { ...prev, total_ml: Math.max(0, prev.total_ml - volumeMl) } : prev));
-    try {
-      // Unlike logWater, removeWater's response IS the server's own
-      // recomputed summary -- use it as the authoritative correction
-      // rather than trusting the optimistic subtraction indefinitely.
-      const summary = await removeWater(volumeMl);
-      setWater(summary);
-    } catch (err) {
-      setWater((prev) => (prev ? { ...prev, total_ml: prev.total_ml + volumeMl } : prev));
-      setActionError(friendlyMessage(err, "water-log"));
-    }
-  }
-
-  async function handleAddGlassSize(label: string, volumeMl: number) {
-    setActionError(null);
-    mutationVersion.current.glass += 1;
-    const tempId = nextTempId();
-    setGlassSizes((prev) => [...(prev ?? []), { id: tempId, label, volume_ml: volumeMl }]);
-    try {
-      const created = await createGlassSize(label, volumeMl);
-      setGlassSizes((prev) => (prev ?? []).map((g) => (g.id === tempId ? created : g)));
-    } catch (err) {
-      setGlassSizes((prev) => (prev ?? []).filter((g) => g.id !== tempId));
-      setActionError(friendlyMessage(err, "glass-size"));
-    }
-  }
-
-  function handleFoodLogStart(entry: FoodLog) {
-    setActionError(null);
-    mutationVersion.current.food += 1;
-    setFoodLogs((prev) => [...(prev ?? []), entry]);
-  }
-
-  function handleFoodLogSuccess(tempId: string, real: FoodLog) {
-    setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === tempId ? real : l)));
-    setDiaryVersion((v) => v + 1);
-    refreshSuggestions();
-  }
-
-  function handleFoodLogError(tempId: string, err: unknown) {
-    setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== tempId));
-    setActionError(friendlyMessage(err, "food-log-save"));
-  }
-
-  async function handleSaveEntry(
-    logId: string,
-    changes: { quantity?: number; meal_type?: MealType },
-  ) {
-    setActionError(null);
-    mutationVersion.current.food += 1;
-    setLogActionBusy(logId);
-    let previous: FoodLog | undefined;
-    setFoodLogs((prev) =>
-      (prev ?? []).map((l) => {
-        if (l.id !== logId) return l;
-        previous = l;
-        // A quantity change scales the logged nutrition proportionally --
-        // the exact same arithmetic the server applies -- so the
-        // optimistic row already shows the real post-edit numbers, not a
-        // placeholder, while the request is in flight.
-        const ratio =
-          changes.quantity !== undefined && l.quantity > 0 ? changes.quantity / l.quantity : 1;
-        return {
-          ...l,
-          quantity: changes.quantity ?? l.quantity,
-          meal_type: changes.meal_type ?? l.meal_type,
-          calories: l.calories * ratio,
-          protein_g: l.protein_g * ratio,
-          carbs_g: l.carbs_g * ratio,
-          fat_g: l.fat_g * ratio,
-        };
-      }),
-    );
-    try {
-      const updated = await updateFoodLog(logId, changes);
-      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === logId ? updated : l)));
-      if (changes.quantity !== undefined) await refreshSuggestions();
-    } catch (err) {
-      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === logId && previous ? previous : l)));
-      setActionError(friendlyMessage(err, "food-log-update"));
-    } finally {
-      setLogActionBusy(null);
-    }
-  }
+  const handleQuickWater = quickWater;
+  const handleRemoveWater = undoWater;
+  const handleAddGlassSize = addGlassSize;
+  const handleFoodLogStart = foodLogStart;
+  const handleFoodLogSuccess = foodLogSuccess;
+  const handleFoodLogError = foodLogError;
+  const handleSaveEntry = saveEntry;
+  const handleSuggestionAdd = addSuggestion;
 
   async function handleDeleteEntry(log: FoodLog) {
-    if (!window.confirm(`Remove ${log.food_name} from today's diary?`)) return;
-    setActionError(null);
-    mutationVersion.current.food += 1;
-    setLogActionBusy(log.id);
-    setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== log.id));
-    try {
-      await deleteFoodLog(log.id);
-      setDiaryVersion((v) => v + 1);
-      await refreshSuggestions();
-    } catch (err) {
-      setFoodLogs((prev) => (prev ? [...prev, log] : prev));
-      setActionError(friendlyMessage(err, "food-log-delete"));
-    } finally {
-      setLogActionBusy(null);
-    }
-  }
-
-  async function handleSuggestionAdd(food: SuggestedFood) {
-    setActionError(null);
-    mutationVersion.current.food += 1;
-    const tempId = nextTempId();
-    const mealType = inferMealType();
-    setFoodLogs((prev) => [
-      ...(prev ?? []),
-      {
-        id: tempId,
-        food_item_id: food.id,
-        food_name: food.name,
-        meal_type: mealType,
-        quantity: 1,
-        calories: food.calories,
-        protein_g: food.protein_g,
-        carbs_g: food.carbs_g,
-        fat_g: food.fat_g,
-        logged_at: new Date().toISOString(),
-        source: "database",
-        serving_description: food.serving_description,
-      },
-    ]);
-    try {
-      const log = await logFood(food.id, mealType, 1);
-      setFoodLogs((prev) => (prev ?? []).map((l) => (l.id === tempId ? log : l)));
-      setDiaryVersion((v) => v + 1);
-      await refreshSuggestions();
-    } catch (err) {
-      setFoodLogs((prev) => (prev ?? []).filter((l) => l.id !== tempId));
-      setActionError(friendlyMessage(err, "food-log-save"));
-    }
+    if (!window.confirm(`Remove ${log.food_name} from ${isToday ? "today's" : "this day's"} diary?`)) return;
+    await deleteEntry(log);
   }
 
   function focusPickerOn(meal: MealType) {
@@ -398,23 +197,35 @@ export default function TodayPage() {
         <header className="flex items-start justify-between pt-1">
           <div>
             <p className="font-label-md text-xs font-medium uppercase tracking-wider text-on-surface-variant">
-              {new Date().toLocaleDateString(undefined, {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
+              {formatDayLong(date)}
             </p>
             <h1 className="font-display text-xl font-bold tracking-tight text-on-surface">
-              Today&apos;s Diary
+              {isToday ? "Today's Diary" : "Diary"}
             </h1>
+            {!isToday && (
+              <p className="mt-1 flex items-center gap-2 text-xs text-on-surface-variant">
+                <span className="rounded-full bg-surface-container px-2 py-0.5 font-medium">
+                  Viewing a past day
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectDate(today)}
+                  className="font-semibold text-primary"
+                >
+                  Back to today
+                </button>
+              </p>
+            )}
           </div>
-          {achievements && <StreakChip achievements={achievements} />}
+          {isToday && achievements && <StreakChip achievements={achievements} />}
         </header>
+
+        <DateStrip selected={date} today={today} onSelect={selectDate} />
 
         {loadError && (
           <p className="rounded-[var(--radius-control)] border border-fat/30 bg-fat/10 p-3 text-sm text-fat">
             {loadError}{" "}
-            <button onClick={loadDay} className="font-semibold underline">
+            <button onClick={() => retry()} className="font-semibold underline">
               Retry
             </button>
           </p>
@@ -487,7 +298,7 @@ export default function TodayPage() {
                 <div className="px-2 py-1">
                   <p className="text-xs text-on-surface-variant">Daily goal</p>
                   <p className="font-semibold text-on-surface">
-                    {profile.target_calories}{" "}
+                    {targets.calories}{" "}
                     <span className="text-xs font-normal text-on-surface-variant">kcal</span>
                   </p>
                 </div>
@@ -495,7 +306,7 @@ export default function TodayPage() {
 
               <div className="mt-4 space-y-2">
                 {MACRO_ROWS.map(({ key, label, colorVar }) => {
-                  const target = profile[`target_${key}` as keyof typeof profile] as number;
+                  const target = (targets[key] ?? 0) as number;
                   const value = consumed[key];
                   const pct = target > 0 ? Math.min(Math.round((value / target) * 100), 100) : 0;
                   return (
@@ -526,6 +337,12 @@ export default function TodayPage() {
             </section>
             )}
 
+            {!isToday && targets.is_approximate && (
+              <p className="text-xs text-on-surface-variant">
+                Targets for days before your target history began are approximate.
+              </p>
+            )}
+
             {/* Meal-by-meal diary */}
             {foodLogs === null ? (
               <div aria-busy="true" className="space-y-4">
@@ -535,6 +352,23 @@ export default function TodayPage() {
               </div>
             ) : (
               <div data-testid="diary" className="space-y-4">
+                {foodLogs.length === 0 && (
+                  <div
+                    data-testid="empty-day"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-card)] border border-dashed border-outline-variant bg-surface-container-lowest p-4"
+                  >
+                    <p className="text-sm text-on-surface-variant">
+                      {isToday ? "Nothing logged yet today." : "Nothing was logged on this day."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => focusPickerOn(pickerMeal)}
+                      className="rounded-[var(--radius-control)] bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary"
+                    >
+                      {isToday ? "Add food" : "Add food for this day"}
+                    </button>
+                  </div>
+                )}
                 {MEAL_TYPES.map((meal) => (
                   <DiaryMeal
                     key={meal}
@@ -560,6 +394,7 @@ export default function TodayPage() {
                 onLogSuccess={handleFoodLogSuccess}
                 onLogError={handleFoodLogError}
                 refreshKey={diaryVersion}
+                logDate={isToday ? undefined : date}
               />
             </div>
 
@@ -573,13 +408,15 @@ export default function TodayPage() {
               disabled={!waterLoaded}
             />
 
-            <SuggestionsCard
-              data={suggestions}
-              loading={suggestionsLoading}
-              error={suggestionsError}
-              onRetry={loadSuggestions}
-              onAdd={handleSuggestionAdd}
-            />
+            {isToday && (
+              <SuggestionsCard
+                data={suggestions}
+                loading={suggestionsLoading}
+                error={suggestionsError}
+                onRetry={retrySuggestions}
+                onAdd={handleSuggestionAdd}
+              />
+            )}
           </div>
         </div>
       </div>

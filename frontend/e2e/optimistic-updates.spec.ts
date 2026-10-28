@@ -92,20 +92,20 @@ async function login(page: import("@playwright/test").Page, email: string, passw
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
-  const initialWaterLoad = page.waitForResponse(
+  const initialDayLoad = page.waitForResponse(
     (res) =>
-      res.url().includes("/api/water-logs") &&
+      /\/api\/days\/\d{4}-\d{2}-\d{2}/.test(res.url()) &&
       res.request().method() === "GET" &&
       res.status() === 200,
   );
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/today/, { timeout: 15_000 });
-  // The initial load fetches food/water/glass-sizes/suggestions in
-  // parallel -- waiting for the real GET here (rather than trusting the
-  // "0 ml" placeholder text, which renders identically whether water has
-  // loaded to zero or hasn't loaded at all) avoids a race where a test's
-  // very next click lands before `water` state exists yet.
-  await initialWaterLoad;
+  // The initial load is one GET /api/days/{date} (diary, water, glass
+  // sizes) -- waiting for it here (rather than trusting the "0 ml"
+  // placeholder text, which renders identically whether water has loaded
+  // to zero or hasn't loaded at all) avoids a race where a test's very
+  // next click lands before the day exists in the cache yet.
+  await initialDayLoad;
 }
 
 async function quickAdd(page: import("@playwright/test").Page, foodName: string, meal: string) {
@@ -383,7 +383,7 @@ test("adding a glass size never refetches food logs or suggestions", async ({ pa
     let suggestionGets = 0;
     page.on("request", (req) => {
       if (req.method() !== "GET") return;
-      if (req.url().includes("/api/food-logs")) foodLogGets += 1;
+      if (/\/api\/days\/\d{4}-\d{2}-\d{2}/.test(req.url())) foodLogGets += 1;
       if (req.url().includes("/api/suggestions")) suggestionGets += 1;
     });
 
@@ -453,15 +453,24 @@ test("switching users in the same tab never reuses the previous user's token or 
 // exactly once (no duplicate requests introduced by the refactor).
 // ---------------------------------------------------------------------------
 
-test("Today's initial load fetches each domain exactly once", async ({ page }) => {
+test("Today's initial load fetches each domain exactly once (day, week strip, suggestions, achievements)", async ({ page }) => {
   const user = await createOnboardedUser("hygiene");
   try {
     const counts: Record<string, number> = {};
+    const matchers: Record<string, RegExp> = {
+      day: /\/api\/days\/\d{4}-\d{2}-\d{2}/,
+      weekSummary: /\/api\/days\/summary/,
+      suggestions: /\/api\/suggestions/,
+      achievements: /\/api\/achievements/,
+      // Folded into the day request; must no longer be fetched separately.
+      oldFoodLogs: /\/api\/food-logs/,
+      oldWaterLogs: /\/api\/water-logs/,
+      oldGlassSizes: /\/api\/glass-sizes/,
+    };
     page.on("request", (req) => {
       if (req.method() !== "GET") return;
-      const url = req.url();
-      for (const key of ["/api/food-logs", "/api/water-logs", "/api/glass-sizes", "/api/suggestions"]) {
-        if (url.includes(key)) counts[key] = (counts[key] ?? 0) + 1;
+      for (const [key, re] of Object.entries(matchers)) {
+        if (re.test(req.url())) counts[key] = (counts[key] ?? 0) + 1;
       }
     });
 
@@ -469,8 +478,11 @@ test("Today's initial load fetches each domain exactly once", async ({ page }) =
     await expect(page.getByTestId("water-total")).toBeVisible();
     await page.waitForTimeout(1_000);
 
-    for (const key of ["/api/food-logs", "/api/water-logs", "/api/glass-sizes", "/api/suggestions"]) {
-      expect(counts[key] ?? 0).toBe(1);
+    for (const key of ["day", "weekSummary", "suggestions", "achievements"]) {
+      expect(counts[key] ?? 0, key).toBe(1);
+    }
+    for (const key of ["oldFoodLogs", "oldWaterLogs", "oldGlassSizes"]) {
+      expect(counts[key] ?? 0, key).toBe(0);
     }
   } finally {
     await deleteUser(user.userId);

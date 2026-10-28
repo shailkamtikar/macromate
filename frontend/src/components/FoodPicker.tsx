@@ -41,6 +41,8 @@ interface FoodPickerProps {
   onLogError?: (tempId: string, err: unknown) => void;
   /** Refresh signal: bump to reload recent/frequent after the diary changes. */
   refreshKey?: number;
+  /** YYYY-MM-DD: log to this (past) day instead of now -- calendar backfill. */
+  logDate?: string;
   /** Pre-fills and runs a search on mount — used when a caller already
    * knows roughly what the user is looking for (e.g. resolving an AI
    * Calculator item that couldn't be confidently matched). */
@@ -93,6 +95,7 @@ export function FoodPicker({
   onLogSuccess,
   onLogError,
   refreshKey = 0,
+  logDate,
   initialQuery,
   onSelect,
 }: FoodPickerProps) {
@@ -195,7 +198,7 @@ export function FoodPicker({
     const tempId = nextTempId();
     onLogStart?.(buildOptimisticLog(tempId, food, meal, 1));
     try {
-      const log = await logFood(food.id, meal, 1);
+      const log = await logFood(food.id, meal, 1, logDate);
       setQuery("");
       setResults([]);
       setSelected(null);
@@ -227,7 +230,7 @@ export function FoodPicker({
     const tempId = nextTempId();
     onLogStart?.(buildOptimisticLog(tempId, selected, meal, quantity));
     try {
-      const log = await logFood(selected.id, meal, quantity);
+      const log = await logFood(selected.id, meal, quantity, logDate);
       setSelected(null);
       setQuery("");
       setResults([]);

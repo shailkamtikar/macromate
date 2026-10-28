@@ -203,14 +203,17 @@ export async function createFood(
   return res.json();
 }
 
+/** `logDate` (YYYY-MM-DD, the user's local date) backfills a past day;
+ * omit it to log "now". */
 export async function logFood(
   food_item_id: string,
   meal_type: MealType,
   quantity: number,
+  logDate?: string,
 ): Promise<FoodLog> {
   const res = await authFetch("/api/food-logs", {
     method: "POST",
-    body: JSON.stringify({ food_item_id, meal_type, quantity }),
+    body: JSON.stringify({ food_item_id, meal_type, quantity, log_date: logDate }),
   });
   return res.json();
 }
@@ -266,20 +269,20 @@ export async function fetchWaterLogs(date: string): Promise<WaterSummary> {
   return res.json();
 }
 
-export async function logWater(volume_ml: number): Promise<WaterLog> {
+export async function logWater(volume_ml: number, logDate?: string): Promise<WaterLog> {
   const res = await authFetch("/api/water-logs", {
     method: "POST",
-    body: JSON.stringify({ volume_ml }),
+    body: JSON.stringify({ volume_ml, log_date: logDate }),
   });
   return res.json();
 }
 
 /** Undo one container's worth of today's water, newest entry first —
  * the "−" control on the glass tracker. Returns the corrected summary. */
-export async function removeWater(volume_ml: number): Promise<WaterSummary> {
+export async function removeWater(volume_ml: number, logDate?: string): Promise<WaterSummary> {
   const res = await authFetch("/api/water-logs/remove", {
     method: "POST",
-    body: JSON.stringify({ volume_ml }),
+    body: JSON.stringify({ volume_ml, log_date: logDate }),
   });
   return res.json();
 }
@@ -501,3 +504,56 @@ export async function fetchSuggestions(): Promise<SuggestionsResponse> {
   return res.json();
 }
 
+
+// ---------------------------------------------------------------------------
+// Calendar: everything the dashboard shows for one day, and a per-day
+// overview of a date range (see backend/app/routers/days.py).
+// ---------------------------------------------------------------------------
+export type DayStatus = "low" | "ok" | "high" | "none";
+
+export interface DayTargets {
+  calories: number;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  water_goal_ml: number | null;
+  /** True when no real target history covers this day (back-filled from
+   * the targets in force when the history feature started). */
+  is_approximate: boolean;
+}
+
+export interface Day {
+  date: string;
+  is_today: boolean;
+  timezone: string;
+  targets: DayTargets;
+  consumed: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  status: { calories: DayStatus; protein: DayStatus; carbs: DayStatus; fat: DayStatus };
+  meals: FoodLog[];
+  water: WaterSummary;
+  glass_sizes: GlassSize[];
+  activity: ActivityLog | null;
+  weight_kg: number | null;
+}
+
+export interface DaySummary {
+  date: string;
+  logged: boolean;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  water_ml: number;
+  target_calories: number;
+  status: { calories: DayStatus; protein: DayStatus; carbs: DayStatus; fat: DayStatus };
+}
+
+export async function fetchDay(date: string): Promise<Day> {
+  const res = await authFetch(`/api/days/${date}`);
+  return res.json();
+}
+
+export async function fetchDaysSummary(start: string, end: string): Promise<DaySummary[]> {
+  const res = await authFetch(`/api/days/summary?start=${start}&end=${end}`);
+  return res.json();
+}

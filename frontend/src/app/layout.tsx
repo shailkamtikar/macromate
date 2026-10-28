@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { WarmPing } from "@/components/WarmPing";
 import { ProfileProvider } from "@/lib/ProfileProvider";
+import { QueryProvider } from "@/lib/query/QueryProvider";
 import { SessionProvider } from "@/lib/SessionProvider";
 import { THEME_COOKIE_NAME } from "@/lib/theme";
 
@@ -89,9 +90,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <ServiceWorkerRegistration />
         <WarmPing />
         <SessionProvider>
-          <ProfileProvider>
-            <AppShell>{children}</AppShell>
-          </ProfileProvider>
+          <QueryProvider>
+            <ProfileProvider>
+              <AppShell>{children}</AppShell>
+            </ProfileProvider>
+          </QueryProvider>
         </SessionProvider>
       </body>
     </html>
